@@ -7664,6 +7664,11 @@ class SyncEngine {
     // 1.31: tablas que el corte del arranque dejó sin
     // intentar (el cierre no les estampa «ok»: no se sabe).
     final noIntentadas = <String>{};
+    // 1.36 (136-917): tablas cuya pasada dejó filas FALLIDAS
+    // sin error de transporte (el conversor las rechazó): su
+    // nombre no entra en erroresTablas, pero su bajada NO fue
+    // limpia y el cierre no les estampa «ok» (ni el global).
+    final tablasConFallidas = <String>{};
     for (final tabla in tablas) {
       // 1.28 (M1-A1): punto de control del ciclo zombi entre
       // tablas (fuera del try por tabla: no debe quedar
@@ -8609,6 +8614,10 @@ class SyncEngine {
           }
         }
       }
+      // 1.36 (136-917): la pasada con filas fallidas queda
+      // registrada para el cierre de sellos (ver la
+      // declaración de tablasConFallidas).
+      if (fallidasTabla > 0) tablasConFallidas.add(tabla);
       // 1.32 (O2F2S, M1): la tabla entra al diario con los
       // deltas de ESTA pasada (la acumulación entre intentos
       // de la misma corrida la hace el cierre, vía
@@ -9055,7 +9064,12 @@ class SyncEngine {
         // y sin falta de permiso; antes se estampaban TODAS,
         // incluidas las que dieron 403/404.
         // 1.31: ni a las que el corte del arranque no intentó.
+        // 1.36 (136-917): ni a las que dejaron filas fallidas
+        // en el conversor (fallidasTabla > 0 sin error de
+        // transporte: su nombre no está en erroresTablas pero
+        // su bajada no fue limpia).
         if (noIntentadas.contains(tabla)) continue;
+        if (tablasConFallidas.contains(tabla)) continue;
         if (erroresTablas.any((e) => e.startsWith('$tabla:'))) {
           continue;
         }
@@ -9065,7 +9079,17 @@ class SyncEngine {
         }
         await _db.setMeta('last_remote_sync_ok_$tabla', horaServidor);
       }
-      await _db.setMeta('last_remote_sync_ok', horaServidor);
+      // 1.36 (136-917): el sello GLOBAL solo nace de una
+      // bajada COMPLETA y limpia: con errores por tabla, con
+      // tablas no intentadas (corte) o con filas fallidas, el
+      // global NO se escribe — antes se estampaba igual,
+      // dentro del mismo try que los sellos por tabla, y un
+      // lector del global veía «ok» sobre una bajada rota.
+      if (erroresTablas.isEmpty &&
+          noIntentadas.isEmpty &&
+          fallidas == 0) {
+        await _db.setMeta('last_remote_sync_ok', horaServidor);
+      }
     } catch (_) {}
     // Sincronizar estado final de operaciones enviadas (aplicada/rechazada)
     await _syncOpStatus();
@@ -9686,7 +9710,13 @@ class SyncEngine {
       final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_estado?id=eq.1&select=server_seq'));
       final dateHdr = r.headers['date'];
-      if (dateHdr == null) return null;
+      if (dateHdr == null) {
+        // 1.36 (136-917): sin cabecera Date NO se pudo medir:
+        // se deja la marca de medición fallida y NO se toca
+        // reloj_desfasado_min (ver el catch).
+        await _db.setMeta('reloj_medicion_fallo', '1');
+        return null;
+      }
       final serverTime = HttpDate.parse(dateHdr);
       final diffMin =
           DateTime.now().toUtc().difference(serverTime).inMinutes.abs();
@@ -9695,8 +9725,24 @@ class SyncEngine {
       } else {
         await _db.setMeta('reloj_desfasado_min', '');
       }
+      // Medición buena: la marca de fallo se limpia — el
+      // '' de reloj_desfasado_min vuelve a significar
+      // «medido y sin desfase», no un resto viejo.
+      await _db.setMeta('reloj_medicion_fallo', '');
       return diffMin;
     } catch (_) {
+      // 1.36 (136-917): la medición FALLÓ (sin red, sesión,
+      // cabecera ilegible). Antes se devolvía null sin dejar
+      // rastro: el reloj_desfasado_min anterior sobrevivía y
+      // sus lectores no podían distinguir «sin desfase» de
+      // «no se pudo medir» — un '' viejo se leía como un
+      // reloj comprobado sano. Ahora el fallo deja SU marca
+      // (reloj_medicion_fallo) y el desfase guardado queda
+      // como lo que es: la última medición BUENA, no una
+      // afirmación fresca.
+      try {
+        await _db.setMeta('reloj_medicion_fallo', '1');
+      } catch (_) {}
       return null;
     }
   }
@@ -11265,106 +11311,149 @@ class SyncEngine {
 
   /// Argón A2: descarga historial de incidencias desde Supabase.
   Future<void> _pullIncidenciasHistorial() async {
-    final wm = await _db.getWatermarkTabla(
+    // 1.36 (136-919): esta era la única sub-bajada de
+    // incidencias SIN el patrón de sus hermanas (comentarios
+    // y fotos): traía UNA sola página de 100 (todo historial
+    // posterior quedaba invisible para siempre, con el
+    // watermark clavado), no registraba su error en
+    // wm_err_incidencias_historial (Salud no podía pintarla)
+    // y su contabilidad de retenciones solo se cerraba en
+    // los caminos felices (el catch re-lanzaba sin cerrar:
+    // las retenciones de la pasada se perdían). Ahora:
+    // paginación con cursor de corrida hasta página corta,
+    // wm_err_ como las demás y cierre en finally (H11).
+    // Sigue SIN llamarse desde _doPull (decisión Argón 1.21:
+    // la tabla no está desplegada en Supabase); la función
+    // queda correcta para cuando se reactive.
+    var wm = await _db.getWatermarkTabla(
         'incidencias_historial');
     // YS-4: contabilidad de retenciones de esta pasada.
     final ret =
         await _abrirRetencionesPull('incidencias_historial');
-    var maxSeqHist = wm;
+    // H4: ¿la pasada alcanzó el fin del flujo del servidor?
+    var finDeFlujo = false;
+    // F-20: cursor de la corrida separado del persistido +
+    // congelamiento por corrida (ver _pullIncidencias).
+    var cursorCorrida = wm;
+    var huboHuerfanoCorrida = false;
     try {
-      final r = await _getAuth(Uri.parse(
-          '$_base/rest/v1/sync_incidencias_historial?sync_seq=gt.$wm'
-          '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // Argón: tabla no desplegada
-    if (r.statusCode != 200) {
-        throw Exception(
-            'pull_inc_historial HTTP ${r.statusCode}');
-      }
-      final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) {
-        // H4: la consulta completó limpia — cerrar la
-        // contabilidad (y limpiar una retención cuya fila ya
-        // no existe en el servidor) antes de salir; este
-        // retorno temprano antes no cerraba nunca.
-        await _cerrarRetencionesPull(
-            'incidencias_historial', ret, wm, finDeFlujo: true);
-        return;
-      }
-      final d = await _db.db;
-      await d.transaction((txn) async {
+      while (true) {
+        final r = await _getAuth(Uri.parse(
+            '$_base/rest/v1/sync_incidencias_historial?sync_seq=gt.$cursorCorrida'
+            '&order=sync_seq&limit=100'));
+        if (r.statusCode == 404) {
+          return; // Argón: tabla no desplegada
+        }
+        if (r.statusCode != 200) {
+          throw Exception(
+              'pull_inc_historial HTTP ${r.statusCode}');
+        }
+        final rows = jsonDecode(r.body) as List;
+        if (rows.isEmpty) {
+          finDeFlujo = true; // H4: nada sobre el watermark.
+          break;
+        }
+        final d = await _db.db;
         var maxSeq = wm;
-        var huboHuerfano = false;
-        for (final row in rows) {
-          final m =
-              Map<String, dynamic>.from(
-                  row as Map);
-          final seq =
-              (m['sync_seq'] as num?)
-                      ?.toInt() ??
-                  0;
-          // v1.3.1 (C3): verificar que el padre exista (FK con PRAGMA ON).
-          final padreH = await txn.query('incidencias_local',
-              columns: ['id'],
-              where: 'id = ?',
-              whereArgs: [m['incidencia_id']],
-              limit: 1);
-          if (padreH.isEmpty) {
-            // YS-4: huérfana retenida > 7 días → cuarentena y
-            // el cursor la salta (este pull no distingue por
-            // rol: la caducidad es su única salida, como
-            // especifica la pieza).
-            if (ret.esCuarentena('${m['id']}')) {
-              await _db.guardarCuarentenaIncidenciaEn(txn,
-                  tabla: 'incidencias_historial',
-                  filaId: '${m['id']}',
-                  seq: seq,
-                  payloadJson: jsonEncode(m),
-                  motivo: 'padre_ausente',
-                  retenidaDesde: ret.registroPrevio?.desde,
-                  caducadaEn: isoHabana(ahoraHabana()));
-              ret.cuarentenaAplicada = true;
-              // H10: sin saltar una huérfana retenida antes en
-              // la misma página (ver _pullIncidencias).
-              if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
+        // F-20: máximo visto en la página (cursor de corrida).
+        var maxSeqPagina = cursorCorrida;
+        await d.transaction((txn) async {
+          for (final row in rows) {
+            final m =
+                Map<String, dynamic>.from(
+                    row as Map);
+            final seq =
+                (m['sync_seq'] as num?)
+                        ?.toInt() ??
+                    0;
+            if (seq > maxSeqPagina) maxSeqPagina = seq;
+            // v1.3.1 (C3): verificar que el padre exista (FK con PRAGMA ON).
+            final padreH = await txn.query('incidencias_local',
+                columns: ['id'],
+                where: 'id = ?',
+                whereArgs: [m['incidencia_id']],
+                limit: 1);
+            if (padreH.isEmpty) {
+              // YS-4: huérfana retenida > 7 días → cuarentena y
+              // el cursor la salta (este pull no distingue por
+              // rol: la caducidad es su única salida, como
+              // especifica la pieza).
+              if (ret.esCuarentena('${m['id']}')) {
+                await _db.guardarCuarentenaIncidenciaEn(txn,
+                    tabla: 'incidencias_historial',
+                    filaId: '${m['id']}',
+                    seq: seq,
+                    payloadJson: jsonEncode(m),
+                    motivo: 'padre_ausente',
+                    retenidaDesde: ret.registroPrevio?.desde,
+                    caducadaEn: isoHabana(ahoraHabana()));
+                ret.cuarentenaAplicada = true;
+                // H10: sin saltar una huérfana retenida antes en
+                // la misma corrida (ver _pullIncidencias).
+                if (!huboHuerfanoCorrida && seq > maxSeq) {
+                  maxSeq = seq;
+                }
+                continue;
+              }
+              huboHuerfanoCorrida = true;
+              ret.anotarRetencion(
+                  '${m['id']}', seq, 'padre_ausente');
               continue;
             }
-            huboHuerfano = true;
-            ret.anotarRetencion('${m['id']}', seq, 'padre_ausente');
-            continue;
+            if (!huboHuerfanoCorrida && seq > maxSeq) {
+              maxSeq = seq;
+            }
+            await txn.insert(
+              'incidencias_historial',
+              {
+                'id': m['id'],
+                'incidencia_id':
+                    m['incidencia_id'],
+                'campo': m['campo'],
+                'valor_anterior':
+                    m['valor_anterior'],
+                'valor_nuevo': m['valor_nuevo'],
+                'cambiado_por':
+                    m['cambiado_por'],
+                'cambiado_en': m['cambiado_en'],
+              },
+              conflictAlgorithm:
+                  ConflictAlgorithm.replace,
+            );
           }
-          if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
-          await txn.insert(
-            'incidencias_historial',
-            {
-              'id': m['id'],
-              'incidencia_id':
-                  m['incidencia_id'],
-              'campo': m['campo'],
-              'valor_anterior':
-                  m['valor_anterior'],
-              'valor_nuevo': m['valor_nuevo'],
-              'cambiado_por':
-                  m['cambiado_por'],
-              'cambiado_en': m['cambiado_en'],
-            },
-            conflictAlgorithm:
-                ConflictAlgorithm.replace,
-          );
+          // Ajuste Argón 1.28 (hallazgo #1): ver
+          // _pullTiposIncidencia.
+          await _db.setWatermarkTablaEn(
+              txn, 'incidencias_historial', maxSeq);
+        });
+        if (rows.length < 100 || maxSeqPagina <= cursorCorrida) {
+          // H4: página corta = fin del flujo (ver
+          // _pullIncidencias).
+          if (rows.length < 100) finDeFlujo = true;
+          break;
         }
-        // Ajuste Argón 1.28 (hallazgo #1): ver
-        // _pullTiposIncidencia.
-        await _db.setWatermarkTablaEn(
-            txn, 'incidencias_historial', maxSeq);
-        maxSeqHist = maxSeq;
-      });
-      await _cerrarRetencionesPull(
-          'incidencias_historial', ret, maxSeqHist,
-          finDeFlujo: rows.length < 100);
+        // F-20: cursor de corrida / persistido topado.
+        cursorCorrida = maxSeqPagina;
+        wm = maxSeq;
+      }
+      // v1.3.1 (Argón pull r2): limpiar error por tabla.
+      await _db.setMeta('wm_err_incidencias_historial', '');
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_hist_fallo',
           d: '$e');
+      // v1.3.1 (Argón pull r2): guardar error por tabla para
+      // el diagnóstico, como las demás sub-bajadas.
+      final errTxt = '$e';
+      await _db.setMeta('wm_err_incidencias_historial',
+          errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       rethrow;
+    } finally {
+      // H11: cierre de retenciones garantizado (ver
+      // _pullIncidencias).
+      await _cerrarRetencionesPull(
+          'incidencias_historial', ret, wm,
+          finDeFlujo: finDeFlujo);
     }
   }
 

@@ -287,6 +287,25 @@ Future<List<AvisoSync>> evaluarVigilanciaSync() async {
 
   // --- A8: reloj del teléfono desfasado >15 min. ---
   try {
+    // 1.36 (136-917): si la ÚLTIMA medición falló, la
+    // vigilancia lo dice como «no se pudo medir» — un resto
+    // distinguible de «sin avisos»: el '' de
+    // reloj_desfasado_min ya no se lee como un reloj
+    // comprobado sano cuando la comprobación ni corrió.
+    final medicionFallo =
+        await _metaSegura(db, 'reloj_medicion_fallo');
+    if (medicionFallo == '1') {
+      avisos.add(const AvisoSync(
+        regla: 'A8',
+        severidad: SeveridadAvisoSync.info,
+        titulo: 'No se pudo comprobar el reloj del teléfono',
+        detalle: 'La última comparación contra la hora del '
+            'servidor falló (sin conexión o sin respuesta). '
+            'No es que el reloj esté bien: es que no se '
+            'pudo medir.',
+        destino: 'reloj',
+      ));
+    }
     final desfaseTxt = await _metaSegura(db, 'reloj_desfasado_min');
     final desfase = int.tryParse(desfaseTxt ?? '') ?? 0;
     if (desfase > 15) {
