@@ -94,6 +94,23 @@ Future<bool> ventaRapidaSuplemento(
 /// Diseñado para que el vendedor no pierda la promo por accidente: el
 /// selector de cliente es visible y, sin cliente, la advertencia de
 /// "sin promo" exige aceptación explícita antes de confirmar.
+/// 1.36 H-B3 (136-752): el mensaje de «margen no calculable»
+/// nombra lo que FALTA de verdad — antes decía «Sin costo
+/// registrado» también cuando el que faltaba era el precio.
+String mensajeSinMargenSuplemento({
+  required bool faltaCosto,
+  required bool faltaPrecio,
+}) {
+  if (faltaCosto && faltaPrecio) {
+    return 'Sin costo ni precio registrados: el margen no se '
+        'puede calcular.';
+  }
+  if (faltaCosto) {
+    return 'Sin costo registrado: el margen no se puede calcular.';
+  }
+  return 'Sin precio registrado: el margen no se puede calcular.';
+}
+
 class _DialogoVentaRapida extends StatefulWidget {
   final Map<String, dynamic> sup;
   final int stock;
@@ -133,10 +150,9 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   bool _promoActiva = false;
   bool _aceptaSinPromo = false;
   bool _guardando = false;
-  // Panel Luna P2 (lote 3): la confirmación de precio tiene un await
-  // antes de activar _guardando; sin esta bandera, dos toques
-  // rápidos podían abrir dos confirmaciones y vender dos veces.
-  bool _confirmandoPrecio = false;
+  // (1.36 H-B3 136-751) la antigua _confirmandoPrecio se
+  // fundió en _guardando: una sola bandera de envío desde
+  // el primer toque de Confirmar hasta el pop.
   // (1.36 H-A2 136-750) la promo y los clientes cargan async:
   // hasta que _cargar termina (o falla), Confirmar está
   // bloqueado — antes se podía vender con la promo aún sin
@@ -191,8 +207,10 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
     final p = _precioVenta;
     if (p == null || p <= 0) return false;
     if (_cantidad < 1 || _cantidad > widget.stock) return false;
-    // Sin cliente: la advertencia debe aceptarse explícitamente.
-    if (!_conCliente && !_aceptaSinPromo) return false;
+    // Sin cliente: la advertencia debe aceptarse
+    // explícitamente — solo si la promo está activa
+    // (136-752: sin promo no hay advertencia que aceptar).
+    if (!_conCliente && _promoActiva && !_aceptaSinPromo) return false;
     // Candado b: precio distinto + no dueño → nota_precio obligatoria.
     if (_precioDifiere &&
         !_permisos.esDueno &&
@@ -255,20 +273,30 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   }
 
   Future<void> _confirmar() async {
-    if (!_puedeConfirmar || _guardando || _confirmandoPrecio) return;
+    if (!_puedeConfirmar || _guardando) return;
+    // 1.36 H-B3 (136-751): UNA sola bandera de envío, activa
+    // desde el primer toque hasta el pop — cubre la vista
+    // previa, el aviso de duplicado y el guardado. Antes
+    // _confirmandoPrecio se liberaba al cerrar la vista
+    // previa y _guardando nacía tras el aviso de duplicado:
+    // entre ambos diálogos las dos estaban en false y un
+    // segundo toque abría otra alta.
+    setState(() => _guardando = true);
+    try {
+      await _confirmarTrasBandera();
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  Future<void> _confirmarTrasBandera() async {
     // 1.25 T91: la confirmación ES la vista previa del
     // comprobante, como en la venta completa (v1.8.1):
     // el mismo texto que recibirá el cliente, con el
     // aviso de precio distinto dentro si lo hay. Antes
     // la rápida solo confirmaba aparte cuando el precio
     // difería, y sin comprobante.
-    _confirmandoPrecio = true;
-    bool ok;
-    try {
-      ok = await _confirmarConVistaPrevia();
-    } finally {
-      _confirmandoPrecio = false;
-    }
+    final ok = await _confirmarConVistaPrevia();
     if (!ok || !mounted) return;
     // T16 (1.20, FIN-16 de Argón): la venta rápida también pasa
     // por el detector de duplicados, con la misma huella que la
@@ -310,7 +338,8 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         }
       }
     }
-    setState(() => _guardando = true);
+    // (136-751) sin segundo setState de _guardando: la
+    // bandera la posee _confirmar de principio a fin.
     try {
       final sid = (widget.sup['id'] as num?)?.toInt();
       if (sid == null) throw Exception('Suplemento sin identificador');
@@ -349,8 +378,6 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         AppLog.error('detalle_suplemento', 'registrar_venta_fallo', d: '$e');
         mostrarSnack(context, 'No se registró la venta: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
-    } finally {
-      if (mounted) setState(() => _guardando = false);
     }
   }
 
@@ -565,7 +592,11 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                 'Venta fiada: no aplica la promo de 1 mes gratis.',
                 style: AppTexto.secundario,
               )
-            else if (!_conCliente)
+            else if (!_conCliente && _promoActiva)
+              // 1.36 H-B3 (136-752): la advertencia de promo
+              // solo existe si la promo está ACTIVA — con la
+              // promo apagada no hay nada que advertir ni que
+              // aceptar.
               _advertenciaSinPromo(),
             // 1.25 T91: fiado y nota, como en la venta
             // completa (el fiado exige cliente y apaga
@@ -870,7 +901,11 @@ Future<void> compartirSuplemento(BuildContext context,
 
 /// 1.25 T120 (F4-06): visor de la foto a pantalla completa
 /// (mismo patrón que el de la ficha del cliente, con zoom).
-void _verFotoGrande(BuildContext context, File f) {
+/// 1.36 H-B3 (136-753): el visor comparte el Hero de la
+/// portada ([tagHero]) — la foto VUELA hasta el visor en vez
+/// de aparecer de golpe.
+void _verFotoGrande(BuildContext context, File f,
+    {required Object tagHero}) {
   showDialog(
     context: context,
     builder: (ctx) => Dialog(
@@ -881,7 +916,10 @@ void _verFotoGrande(BuildContext context, File f) {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(AppRadio.lg),
           child: InteractiveViewer(
-            child: Image.file(f, fit: BoxFit.contain),
+            child: Hero(
+              tag: tagHero,
+              child: Image.file(f, fit: BoxFit.contain),
+            ),
           ),
         ),
       ),
@@ -963,7 +1001,10 @@ class DetalleSuplementoScreen extends StatelessWidget {
         acciones: [
           IconButton(
             icon: const Icon(Icons.share_rounded),
-            tooltip: 'Compartir por WhatsApp',
+            // 1.36 H-B3 (136-752): el tooltip dice lo que el
+            // botón hace — abre la hoja de compartir del
+            // sistema, no WhatsApp directamente.
+            tooltip: 'Compartir suplemento',
             onPressed: () =>
                 compartirSuplemento(context, suplemento, tasaUsd),
           ),
@@ -1088,7 +1129,8 @@ class DetalleSuplementoScreen extends StatelessWidget {
               // 1.25 T120 (F4-06): la foto del escaparate crece
               // (200 → 264) y se amplía al toque.
               child: GestureDetector(
-                onTap: () => _verFotoGrande(context, archivoLocal),
+                onTap: () => _verFotoGrande(context, archivoLocal,
+                    tagHero: tagHeroSuplemento(suplemento['id'])),
                 child: Image(
                   image: providerFotoAcotada(
                       FileImage(archivoLocal),
@@ -1132,13 +1174,25 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   return ClipRRect(
                     borderRadius: BorderRadius.zero,
                     child: GestureDetector(
-                      onTap: () => _verFotoGrande(context, f),
+                      onTap: () => _verFotoGrande(context, f,
+                          tagHero:
+                              tagHeroSuplemento(suplemento['id'])),
                       child: Image(
                           image: providerFotoAcotada(FileImage(f),
                               ancho: 1080),
                           height: 300,
                           width: double.infinity,
-                          fit: BoxFit.cover),
+                          fit: BoxFit.cover,
+                          // 1.36 H-B3 (136-752): la rama remota
+                          // también lleva errorBuilder (la local
+                          // ya lo tenía): una caché corrupta no
+                          // deja la imagen rota en la portada.
+                          errorBuilder: (_, __, ___) =>
+                              const PlaceholderSuplemento(
+                            alto: 300,
+                            radio: 0,
+                            tamanoIcono: 72,
+                          )),
                     ),
                   );
                 },
@@ -1293,11 +1347,14 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 // 1.25 T120 (F4-06): antes el bloque desaparecía
                 // en silencio y «sin margen calculable» se leía
                 // como margen cero.
-                return const Padding(
-                  padding: EdgeInsets.only(top: AppEspacio.md),
+                // 1.36 H-B3 (136-752): el mensaje nombra lo que
+                // falta (costo, precio o ambos).
+                return Padding(
+                  padding: const EdgeInsets.only(top: AppEspacio.md),
                   child: Text(
-                    'Sin costo registrado: el margen no se puede '
-                    'calcular.',
+                    mensajeSinMargenSuplemento(
+                        faltaCosto: costo <= 0,
+                        faltaPrecio: precio <= 0),
                     style: AppTexto.secundario,
                   ),
                 );
@@ -1321,14 +1378,26 @@ class DetalleSuplementoScreen extends StatelessWidget {
               }
               final margen = m.margenUnitario!;
               final pct = m.pct!;
+              // 1.36 H-B3 (136-752): un margen NEGATIVO se
+              // pinta como lo que es — flecha hacia abajo y
+              // color de error (antes salía en verde con
+              // trending_up, como si fuera ganancia).
+              final negativo = margen < 0;
+              final colorMargen = negativo
+                  ? AppColores.errorTexto(ctx)
+                  : AppColores.exito;
               return Column(
                 children: [
                   const SizedBox(height: AppEspacio.md),
                   Tarjeta(
                     child: Row(
                       children: [
-                        const Icon(Icons.trending_up_rounded,
-                            color: AppColores.exito, size: 32),
+                        Icon(
+                            negativo
+                                ? Icons.trending_down_rounded
+                                : Icons.trending_up_rounded,
+                            color: colorMargen,
+                            size: 32),
                         const SizedBox(width: AppEspacio.md),
                         Expanded(
                           child: Column(
@@ -1340,7 +1409,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                                   '(${pct.toStringAsFixed(0)}%)',
                                   style: AppTexto.cuerpo.copyWith(
                                       fontWeight: FontWeight.bold,
-                                      color: AppColores.exito)),
+                                      color: colorMargen)),
                               Text(
                                   'Costo: ${costo.toStringAsFixed(2)} USD',
                                   style: AppTexto.secundario),
@@ -1481,13 +1550,30 @@ class _DialogoAjustarStockState extends State<_DialogoAjustarStock> {
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: '${widget.stockActual}');
+    // 1.36 H-B3 (136-753): la validación es EN LÍNEA — el
+    // diálogo repinta con cada tecla y el error vive bajo el
+    // campo (antes validaba el llamador tras cerrar, con un
+    // snack, y el dato tecleado se perdía).
+    _ctrl.addListener(_repintar);
+  }
+
+  void _repintar() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _ctrl.removeListener(_repintar);
     _ctrl.dispose();
     _notaCtrl.dispose();
     super.dispose();
+  }
+
+  int? get _nuevoStock => int.tryParse(_ctrl.text.trim());
+
+  bool get _stockValido {
+    final n = _nuevoStock;
+    return n != null && n >= 0;
   }
 
   @override
@@ -1506,6 +1592,9 @@ class _DialogoAjustarStockState extends State<_DialogoAjustarStock> {
             controller: _ctrl,
             etiqueta: 'Nuevo stock',
             teclado: TextInputType.number,
+            errorText: _ctrl.text.trim().isNotEmpty && !_stockValido
+                ? 'Escribe un stock válido (0 o más).'
+                : null,
           ),
           const SizedBox(height: AppEspacio.md),
           SelectorIron<String>(
@@ -1528,13 +1617,20 @@ class _DialogoAjustarStockState extends State<_DialogoAjustarStock> {
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
-        TextButton(
-            onPressed: () => Navigator.pop(context, (
-                  stockTexto: _ctrl.text,
-                  nota: _notaCtrl.text,
-                  motivo: _motivo,
-                )),
-            child: const Text('Ajustar')),
+        // 1.36 H-B3 (136-753): la acción principal es el
+        // BotonPrimario de la casa y nace deshabilitada si el
+        // stock tecleado no es válido.
+        BotonPrimario(
+          texto: 'Ajustar',
+          expandido: false,
+          onPressed: _stockValido
+              ? () => Navigator.pop(context, (
+                    stockTexto: _ctrl.text,
+                    nota: _notaCtrl.text,
+                    motivo: _motivo,
+                  ))
+              : null,
+        ),
       ],
     );
   }
@@ -1612,7 +1708,26 @@ class _MovimientosStockState extends State<_MovimientosStock> {
         },
       );
     }
-    if (!_listo) return const SizedBox.shrink();
+    // 1.36 H-B3 (136-753): mientras carga hay INDICADOR —
+    // antes la zona quedaba en blanco (SizedBox.shrink) y
+    // parecía que no había movimientos.
+    if (!_listo) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppEspacio.md),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: AppEspacio.sm),
+            Text('Cargando movimientos…',
+                style: AppTexto.secundario),
+          ],
+        ),
+      );
+    }
     if (_movs.isEmpty) {
       return const Text('Sin movimientos registrados.',
           style: AppTexto.secundario);
@@ -1815,42 +1930,66 @@ Future<void> _eliminarSuplemento(
   if (id == null) return;
   final db = LocalDb.instance;
 
-  // Argón: verificar localmente que no tenga ventas antes de
-  // borrar (guarda de ventas de §5.3 punto 1, vía helper).
-  final nVentas = await ventasEspejoDeSuplemento(id);
-  if (nVentas > 0) {
-    if (!context.mounted) return;
-    mostrarSnack(context, 'No se puede eliminar: tiene $nVentas venta(s) registrada(s).', significado: SignificadoChip.alerta);
-    return;
+  // 1.36 H-B3 (136-753): los conteos previos corren tras un
+  // diálogo de carga — antes el menú parecía muerto mientras
+  // se contaban ventas, ops vivas y la cascada.
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Dialog(
+      child: Padding(
+        padding: EdgeInsets.all(AppEspacio.lg),
+        child: EstadoCargando(texto: 'Comprobando el suplemento…'),
+      ),
+    ),
+  );
+  String? bloqueo;
+  CuentasCascada? cuentas;
+  try {
+    // Argón: verificar localmente que no tenga ventas antes de
+    // borrar (guarda de ventas de §5.3 punto 1, vía helper).
+    final nVentas = await ventasEspejoDeSuplemento(id);
+    if (nVentas > 0) {
+      bloqueo =
+          'No se puede eliminar: tiene $nVentas venta(s) registrada(s).';
+    } else {
+      // Argón #9 (ALTO): el espejo solo trae ventas ya sincronizadas.
+      // Una venta recién hecha vive en ops_queue (detrás del pull):
+      // borrar ahora dejaría la op de eliminar detrás de la venta
+      // pendiente y el servidor la rebotaría por su guarda de
+      // ventas. Solo cuentan ops vivas (pendiente/enviada/en
+      // revisión): aplicada ya está en el espejo y rechazada no se
+      // aplicará.
+      // 1.30 (Oleada 4): los botes abiertos YA NO bloquean — la
+      // cascada los borra con el suplemento (§5.2 paso 5) y la
+      // confirmación enseña antes sus cuentas (§5.3 punto 2).
+      // Yunque B (YB-SER-05): el conteo vive en
+      // opsVivasQueReferencianSuplemento y cubre también las ops
+      // de dosis por pomo, los rellenos y las de reserva.
+      final nPendientes =
+          await opsVivasQueReferencianSuplemento(db, id);
+      if (nPendientes > 0) {
+        bloqueo = 'No se puede eliminar: tiene operaciones '
+            'pendientes de sincronizar.';
+      } else {
+        // 1.30 (Oleada 4, §5.3 punto 2): las cuentas de lo que
+        // se va, desde los espejos, ANTES de que el dueño
+        // confirme.
+        cuentas = await cuentasCascadaSuplemento(id);
+      }
+    }
+  } finally {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
   }
-
-  // Argón #9 (ALTO): el espejo solo trae ventas ya sincronizadas.
-  // Una venta recién hecha vive en ops_queue (detrás del pull):
-  // borrar ahora dejaría la op de eliminar detrás de la venta
-  // pendiente y el servidor la rebotaría por su guarda de
-  // ventas. Solo cuentan ops vivas (pendiente/enviada/en
-  // revisión): aplicada ya está en el espejo y rechazada no se
-  // aplicará.
-  // 1.30 (Oleada 4): los botes abiertos YA NO bloquean — la
-  // cascada los borra con el suplemento (§5.2 paso 5) y la
-  // confirmación enseña antes sus cuentas (§5.3 punto 2).
-  // Yunque B (YB-SER-05): el conteo vive en
-  // opsVivasQueReferencianSuplemento y cubre también las ops
-  // de dosis por pomo, los rellenos y las de reserva.
-  final nPendientes =
-      await opsVivasQueReferencianSuplemento(db, id);
-  if (nPendientes > 0) {
-    if (!context.mounted) return;
-    mostrarSnack(context, 'No se puede eliminar: tiene operaciones pendientes de sincronizar.', significado: SignificadoChip.alerta);
-    return;
-  }
-
   if (!context.mounted) return;
+  if (bloqueo != null) {
+    mostrarSnack(context, bloqueo, significado: SignificadoChip.alerta);
+    return;
+  }
+  if (cuentas == null) return;
   final nombre = '${s['nombre'] ?? 'suplemento'}';
-  // 1.30 (Oleada 4, §5.3 punto 2): las cuentas de lo que se va,
-  // desde los espejos, ANTES de que el dueño confirme.
-  final cuentas = await cuentasCascadaSuplemento(id);
-  if (!context.mounted) return;
   final ok = await DialogoApp.confirmar(
     context,
     titulo: 'Eliminar suplemento',

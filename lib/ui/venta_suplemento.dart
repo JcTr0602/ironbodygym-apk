@@ -128,6 +128,13 @@ class _VentaSuplementoScreenState
   String _clienteNombre = '';
   bool _promoActiva = false;
   bool _guardando = false;
+  // 1.36 H-B3 (136-756): el stock VIGENTE vive en el State y
+  // se repinta (antes el stepper y la cabecera pintaban la
+  // foto del widget aunque confirmar releía el espejo: tras
+  // un pull, «Quedan N» mentía). Y elegir cliente muestra
+  // su espera.
+  int? _stockVigenteState;
+  bool _eligiendoCliente = false;
   // (1.36 H-A2 136-754) bandera de confirmación desde el
   // PRIMER toque: cubre permiso, pre-chequeo de stock, vista
   // previa y aviso de duplicado — los awaits previos a
@@ -143,17 +150,24 @@ class _VentaSuplementoScreenState
   File? _fotoMini;
 
   Future<void> _resolverFotoMini() async {
-    final sup = widget.suplemento;
-    final fotoLocal = sup['foto_local'] as String?;
-    File? f;
-    if (fotoLocal != null && fotoLocal.isNotEmpty) {
-      final lf = File(fotoLocal);
-      if (await lf.exists()) f = lf;
+    // 1.36 H-B3 (136-755): el future nace con red — un fallo
+    // de disco/caché deja el placeholder de la casa y su
+    // rastro en bitácora, no un error sin capturar flotando.
+    try {
+      final sup = widget.suplemento;
+      final fotoLocal = sup['foto_local'] as String?;
+      File? f;
+      if (fotoLocal != null && fotoLocal.isNotEmpty) {
+        final lf = File(fotoLocal);
+        if (await lf.exists()) f = lf;
+      }
+      f ??= await FotoCache.instance
+          .obtener(sup['foto_storage'] as String?);
+      if (!mounted) return;
+      setState(() => _fotoMini = f);
+    } catch (e) {
+      AppLog.error('venta_suplemento', 'foto_mini_fallo', d: '$e');
     }
-    f ??= await FotoCache.instance
-        .obtener(sup['foto_storage'] as String?);
-    if (!mounted) return;
-    setState(() => _fotoMini = f);
   }
 
   double get _precioOficial =>
@@ -274,6 +288,7 @@ class _VentaSuplementoScreenState
       _clienteNombre = widget.clienteNombreInicial ?? '';
     }
     _resolverFotoMini();
+    _repintarStockVigente();
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() {
@@ -289,6 +304,12 @@ class _VentaSuplementoScreenState
           }
         });
       }
+      // 1.36 H-B3 (136-755): si los ajustes no se pueden leer,
+      // queda rastro en bitácora (promo/tasa quedan en sus
+      // valores por defecto y las validaciones de confirmar
+      // exigen la tasa: no se vende a ciegas en silencio).
+    }).onError((Object e, StackTrace _) {
+      AppLog.error('venta_suplemento', 'ajustes_fallo', d: '$e');
     });
   }
 
@@ -302,9 +323,29 @@ class _VentaSuplementoScreenState
     super.dispose();
   }
 
+  /// 1.36 H-B3 (136-756): trae el stock vigente al State
+  /// para que el stepper y la cabecera lo repinten.
+  Future<void> _repintarStockVigente() async {
+    try {
+      final s = await _stockVigente();
+      if (mounted) setState(() => _stockVigenteState = s);
+    } catch (e) {
+      AppLog.error('venta_suplemento', 'stock_vigente_fallo',
+          d: '$e');
+    }
+  }
+
   Future<void> _elegirCliente() async {
-    final clientes =
-        await LocalDb.instance.allMirror('clientes');
+    // 1.36 H-B3 (136-756): la espera del padrón se VE
+    // (spinner en el selector) y no admite doble toque.
+    if (_eligiendoCliente) return;
+    setState(() => _eligiendoCliente = true);
+    final List<Map<String, dynamic>> clientes;
+    try {
+      clientes = await LocalDb.instance.allMirror('clientes');
+    } finally {
+      if (mounted) setState(() => _eligiendoCliente = false);
+    }
     final activos = clientes
         .where((c) => (c['estado'] as String?) == 'activo')
         .toList()
@@ -692,10 +733,13 @@ class _VentaSuplementoScreenState
             if (difiere) ...[
               const SizedBox(height: 12),
               Text(
-                '⚠️ Precio distinto al oficial '
+                // 1.36 H-B3 (136-756): token adaptable
+                // errorTexto y sin emoji en el texto (el
+                // aviso ya va en la vista previa del cobro).
+                'Precio distinto al oficial '
                 '(${oficialRef.toStringAsFixed(2)} $_moneda).',
                 style: AppTexto.cuerpo
-                    .copyWith(color: AppColores.error),
+                    .copyWith(color: AppColores.errorTexto(context)),
               ),
             ],
             ],
@@ -787,15 +831,21 @@ class _VentaSuplementoScreenState
                   alPulsar: () async {
                     final url = Uri.parse(
                         'https://wa.me/$waNum?text=${Uri.encodeComponent(textoComprobante)}');
+                    // 1.36 H-B3 (136-756): launchUrl puede
+                    // devolver FALSE sin lanzar (sin app que
+                    // abra el enlace): también se avisa, no
+                    // solo la excepción.
+                    var abierto = false;
                     try {
-                      await launchUrl(url,
+                      abierto = await launchUrl(url,
                           mode: LaunchMode.externalApplication);
                     } catch (_) {
-                      if (mounted) {
-                        mostrarSnack(
-                            context, 'No se pudo abrir WhatsApp',
-                            significado: SignificadoChip.error);
-                      }
+                      abierto = false;
+                    }
+                    if (!abierto && mounted) {
+                      mostrarSnack(
+                          context, 'No se pudo abrir WhatsApp',
+                          significado: SignificadoChip.error);
                     }
                   },
                 ),
@@ -806,7 +856,9 @@ class _VentaSuplementoScreenState
 
   /// Abre la pantalla combinada inscripción + venta con los datos
   /// ya elegidos. Si vuelve con éxito, cierra esta pantalla también.
-  Future<void> _irAInscripcionVenta() async {
+  /// Devuelve true solo si la inscripción+venta se completó
+  /// (136-755: el selector restaura el radio si no se completó).
+  Future<bool> _irAInscripcionVenta() async {
     // Argón P1#2-parte: mismo pre-chequeo de stock que _confirmar.
     // 1.23 S-7: contra el espejo VIGENTE (ver _stockVigente).
     final stockActual = await _stockVigente();
@@ -818,7 +870,7 @@ class _VentaSuplementoScreenState
               : 'Solo quedan $stockActual en stock.',
           aceptar: 'Entendido',
           cancelar: '');
-      return;
+      return false;
     }
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
@@ -828,20 +880,25 @@ class _VentaSuplementoScreenState
           mensaje: 'Indica un precio de venta mayor que 0.',
           aceptar: 'Entendido',
           cancelar: '');
-      return;
+      return false;
     }
     {
-      // v1.3.4 (pedido Jc 2026-10-16): tasa solo obligatoria en CUP;
-      // en USD el campo está oculto y viaja null.
-      final tasa = _moneda == 'CUP' ? _tasaUsd : null;
-      if (_moneda == 'CUP' && (tasa == null || tasa <= 0)) {
+      // 1.36 H-B3 (136-755): la tasa se valida en CUALQUIER
+      // moneda, como en la venta simple (1.23 AT-15: en USD el
+      // servidor la EXIGE para valorar la venta). Antes esta
+      // vía solo la miraba en CUP y pasaba _tasaUsd sin
+      // validar en USD.
+      final tasa = _tasaUsd;
+      if (tasa == null || tasa <= 0 || !tasa.isFinite) {
         await DialogoApp.confirmar(context,
             titulo: 'Revisa la valoración',
-            mensaje:
-                'Indica a cuántos CUP equivale 1 USD para esta venta.',
+            mensaje: _moneda == 'CUP'
+                ? 'Indica a cuántos CUP equivale 1 USD para esta venta.'
+                : 'Falta la tasa del día para valorar la venta en '
+                    'USD. Jc la configura en Admin (tasa USD).',
             aceptar: 'Entendido',
             cancelar: '');
-        return;
+        return false;
       }
     }
     // Auditoría (Argón): el flujo inscribir_nuevo no puede bypassear
@@ -856,9 +913,9 @@ class _VentaSuplementoScreenState
               'ej. "Autorizado por Jc por compra de 2 botes").',
           aceptar: 'Entendido',
           cancelar: '');
-      return;
+      return false;
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     // 1.15 V3: el camino inscripción+venta envía el oficial
     // CONVERTIDO a la moneda de la venta, nunca el crudo. Si no
     // hay conversión válida (falta tasa para USD): BLOQUEAR la
@@ -875,7 +932,7 @@ class _VentaSuplementoScreenState
               'día antes de inscribir.',
           aceptar: 'Entendido',
           cancelar: '');
-      return;
+      return false;
     }
     final ok = await Navigator.push<bool>(
       context,
@@ -893,12 +950,16 @@ class _VentaSuplementoScreenState
       ),
     );
     if (ok == true && mounted) Navigator.pop(context, true);
+    return ok == true;
   }
 
   @override
   Widget build(BuildContext context) {
-    final stock =
-        (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    // 1.36 H-B3 (136-756): manda el stock vigente del State;
+    // la foto del widget solo es el valor inicial.
+    final stock = _stockVigenteState ??
+        (widget.suplemento['stock'] as num?)?.toInt() ??
+        0;
     return Scaffold(
       appBar: appBarIron(context, 'Registrar venta'),
       body: ListView(
@@ -1137,19 +1198,24 @@ class _VentaSuplementoScreenState
     // la casa (PlaceholderSuplemento), no una copia a mano.
     Widget placeholder() =>
         const PlaceholderSuplemento(alto: 56);
-    return SizedBox(
-      width: 56,
-      height: 56,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadio.sm),
-        child: _fotoMini != null
-            ? Image.file(_fotoMini!,
-                fit: BoxFit.cover,
-                cacheWidth:
-                    (56 * MediaQuery.devicePixelRatioOf(context))
-                        .round(),
-                errorBuilder: (_, __, ___) => placeholder())
-            : placeholder(),
+    // 1.36 H-B3 (136-756): la miniatura comparte el Hero de
+    // la portada del detalle (mismo tag de la casa).
+    return Hero(
+      tag: tagHeroSuplemento(widget.suplemento['id']),
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          child: _fotoMini != null
+              ? Image.file(_fotoMini!,
+                  fit: BoxFit.cover,
+                  cacheWidth:
+                      (56 * MediaQuery.devicePixelRatioOf(context))
+                          .round(),
+                  errorBuilder: (_, __, ___) => placeholder())
+              : placeholder(),
+        ),
       ),
     );
   }
@@ -1213,8 +1279,11 @@ class _VentaSuplementoScreenState
                 // Lote 1 Argón: el oficial convertido a la moneda de la
                 // venta (antes mostraba el crudo con la moneda fija
                 // del suplemento).
+                // 1.36 H-B3 (136-755): si no hay conversión, el
+                // crudo se etiqueta con la moneda DEL SUPLEMENTO
+                // (la suya), no con la de la venta.
                 'Vas a vender a un precio distinto al oficial '
-                '(${(_oficialEnMoneda ?? _precioOficial).toStringAsFixed(2)} $_moneda). '
+                '(${_oficialEnMoneda != null ? '${_oficialEnMoneda!.toStringAsFixed(2)} $_moneda' : '${_precioOficial.toStringAsFixed(2)} $_monedaSuplemento'}). '
                 'Quedarán registrados ambos precios para auditoría.',
                 style: AppTexto.secundario,
               ),
@@ -1252,7 +1321,18 @@ class _VentaSuplementoScreenState
         if (v == 'cliente') {
           _elegirCliente();
         } else if (v == 'inscribir_nuevo') {
-          _irAInscripcionVenta();
+          // 1.36 H-B3 (136-755): el radio se actualiza ANTES
+          // de navegar (quedaba en la opción anterior durante
+          // todo el flujo); si la inscripción no se completa,
+          // el radio vuelve a donde estaba — «inscribir_nuevo»
+          // no es un tipo de comprador confirmable aquí.
+          final anterior = _tipoComprador;
+          setState(() => _tipoComprador = 'inscribir_nuevo');
+          _irAInscripcionVenta().then((hecho) {
+            if (!hecho && mounted) {
+              setState(() => _tipoComprador = anterior);
+            }
+          });
         } else if (v != null) {
           setState(() => _tipoComprador = v);
         }
@@ -1270,14 +1350,23 @@ class _VentaSuplementoScreenState
                       : 'Cliente: $_clienteNombre — toca para cambiar',
                   style: AppTexto.cuerpo),
             ),
-            secondary: _clienteId == null
-                ? IconButton(
-                    icon: Icon(Icons.person_search_rounded,
-                        color: AppColores.textoSecundario(context)),
-                    onPressed: _elegirCliente,
-                    tooltip: 'Seleccionar cliente',
+            // 1.36 H-B3 (136-756): mientras el padrón carga,
+            // el selector muestra el spinner.
+            secondary: _eligiendoCliente
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : null,
+                : _clienteId == null
+                    ? IconButton(
+                        icon: Icon(Icons.person_search_rounded,
+                            color:
+                                AppColores.textoSecundario(context)),
+                        onPressed: _elegirCliente,
+                        tooltip: 'Seleccionar cliente',
+                      )
+                    : null,
           ),
           const RadioListTile<String>(
             value: 'externo_nombre',
@@ -1337,10 +1426,22 @@ class _DialogoBuscarCliente extends StatefulWidget {
 
 class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
   final _ctrl = TextEditingController();
+  final _foco = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // CampoTexto no trae autofocus: se pide el foco al montar
+    // (el diálogo sigue abriendo con el buscador listo).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _foco.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _foco.dispose();
     super.dispose();
   }
 
@@ -1361,22 +1462,27 @@ class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
         height: 380,
         child: Column(
           children: [
-            TextField(
+            // 1.36 H-B3 (136-756): buscador con el CampoTexto
+            // de la casa y vacío con EstadoVacio (antes un
+            // TextField con decoración propia y un «Sin
+            // resultados» plano).
+            CampoTexto(
               controller: _ctrl,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'Buscar por nombre…',
-                prefixIcon: Icon(Icons.search_rounded),
-                border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-              ),
+              focusNode: _foco,
+              hint: 'Buscar por nombre…',
+              icono: Icons.search_rounded,
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 8),
             Expanded(
               child: filtrados.isEmpty
-                  ? const Center(child: Text('Sin resultados'))
+                  ? const EstadoVacio(
+                      sinMarco: true,
+                      icono: Icons.search_off_rounded,
+                      titulo: 'Sin resultados',
+                      subtitulo:
+                          'Ningún cliente activo coincide con esa búsqueda.',
+                    )
                   : ListView.builder(
                       shrinkWrap: true,
                       itemCount: filtrados.length,
