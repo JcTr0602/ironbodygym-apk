@@ -212,8 +212,11 @@ class PadNumerico extends StatelessWidget {
               key: ValueKey('pad-$t'),
               borderRadius: BorderRadius.circular(AppRadio.sm),
               onTap: apagada ? null : () => _tecla(t),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
+              child: SizedBox(
+                // 1.36 H-C1 (136-351): objetivo táctil de
+                // 48 dp por tecla — 42 útiles + el padding
+                // de 3 por lado de la celda.
+                height: 42,
                 child: Center(
                   child: Semantics(
                     button: true,
@@ -353,6 +356,15 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar>
         oldWidget.texto != widget.texto) {
       _anim.stop();
       _confirmado = false;
+      _progreso = 0;
+    }
+    // 1.36 H-C1 (136-357): al pasar a DESHABILITADO el
+    // progreso parcial también se reinicia (antes quedaba
+    // pintado a medias tras el control apagado) y una
+    // llegada animada en curso ya no confirma en apagado.
+    if (oldWidget.habilitado && !widget.habilitado) {
+      _anim.stop();
+      _confirmarAlLlegar = false;
       _progreso = 0;
     }
   }
@@ -513,7 +525,11 @@ class _HojaMontoPadState extends State<_HojaMontoPad> {
         bottom: MediaQuery.of(context).viewInsets.bottom +
             AppEspacio.lg,
       ),
-      child: Column(
+      // 1.36 H-C1 (136-353): la columna va en scroll — con
+      // el teclado abierto en una pantalla corta la hoja ya
+      // no desborda por abajo.
+      child: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -527,15 +543,24 @@ class _HojaMontoPadState extends State<_HojaMontoPad> {
               border: Border.all(color: AppColores.borde(context)),
               borderRadius: BorderRadius.circular(AppRadio.md),
             ),
-            child: Text(
-              _valor.isEmpty ? '0' : _valor,
-              style: AppTexto.display.copyWith(
-                fontFeatures: const [FontFeature.tabularFigures()],
-                color: _valor.isEmpty
-                    ? AppColores.textoSecundario(context)
-                    : null,
+            // 1.36 H-C1 (136-353): un importe muy largo se
+            // acota encogiendo (FittedBox), no envolviendo.
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  _valor.isEmpty ? '0' : _valor,
+                  maxLines: 1,
+                  style: AppTexto.display.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    color: _valor.isEmpty
+                        ? AppColores.textoSecundario(context)
+                        : null,
+                  ),
+                  textAlign: TextAlign.end,
+                ),
               ),
-              textAlign: TextAlign.end,
             ),
           ),
           if (widget.sufijo != null)
@@ -587,6 +612,7 @@ class _HojaMontoPadState extends State<_HojaMontoPad> {
             ],
           ),
         ],
+        ),
       ),
     );
   }

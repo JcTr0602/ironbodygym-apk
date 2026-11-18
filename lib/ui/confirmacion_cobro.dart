@@ -411,7 +411,10 @@ class _ConfirmacionOperacionScreenState
                               colorSuave:
                                   AppColores.textoSecundario(
                                       context),
-                              conWordmark: true,
+                              // 1.36 H-C1 (136-389): SIN
+                              // wordmark — la cabecera del
+                              // ticket ya lo pinta; salía
+                              // dos veces en el comprobante.
                             ),
                           ),
                         ],

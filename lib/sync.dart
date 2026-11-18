@@ -522,6 +522,17 @@ class SyncDetalle {
   int get bajados => bajadosUltimo;
 }
 
+/// 1.36 H-C1 (136-331): referencia de antigüedad para el
+/// aviso «llevas X h sin subir cambios» de Home. Manda el
+/// último push; si nunca hubo push, manda la creación de
+/// la op pendiente más vieja (sin esa marca el aviso no
+/// salía jamás en un teléfono que nunca subió, aunque los
+/// pendientes sí se veían por el banner).
+DateTime? referenciaAntiguedadPendientes(
+    {DateTime? ultimaPush, DateTime? opMasVieja}) {
+  return ultimaPush ?? opMasVieja;
+}
+
 /// v1.8.0 (Frente 5): por qué un ciclo de sincronización NO corrió.
 /// Antes `run()` tragaba el false del lock y la UI armaba el
 /// resumen con contadores meta de corridas viejas: el diálogo decía

@@ -96,8 +96,10 @@ class PieTarjetaImagen extends StatelessWidget {
   /// Color de la línea oficial (la secundaria).
   final Color colorSuave;
 
-  /// Las tarjetas sin marca propia en la cabecera (el
-  /// ticket de cobro) firman también con el wordmark.
+  /// 1.36 H-C1 (136-389): contrato — true SOLO en
+  /// tarjetas SIN [CabeceraTarjetaIron] (que ya pinta el
+  /// wordmark). Con cabecera, el pie va sin wordmark: el
+  /// comprobante de cobro lo llevaba dos veces.
   final bool conWordmark;
 
   const PieTarjetaImagen({
@@ -109,7 +111,13 @@ class PieTarjetaImagen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    // 1.36 H-C1 (136-395): el pie trae su PROPIO padding
+    // vertical y un cuerpo mayor (12): la imagen se
+    // comparte por WhatsApp, que comprime, y el texto a
+    // 10.5/11 se leía justo.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (conWordmark) ...[
@@ -118,7 +126,7 @@ class PieTarjetaImagen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               color: colorPrincipal,
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.2,
             ),
@@ -128,7 +136,7 @@ class PieTarjetaImagen extends StatelessWidget {
         Text(
           lineaOficialTarjetaImagen,
           textAlign: TextAlign.center,
-          style: TextStyle(color: colorSuave, fontSize: 11),
+          style: TextStyle(color: colorSuave, fontSize: 12),
         ),
         const SizedBox(height: 2),
         Text(
@@ -136,11 +144,12 @@ class PieTarjetaImagen extends StatelessWidget {
           textAlign: TextAlign.center,
           style: TextStyle(
             color: colorPrincipal,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
         ),
       ],
+      ),
     );
   }
 }

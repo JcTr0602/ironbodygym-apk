@@ -119,6 +119,16 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
     duration: AppMovimiento.larga,
   );
 
+  /// 1.36 H-C1 (136-397): transición CORTA del punto
+  /// seleccionado (radio y guía crecen, no saltan). El
+  /// trazo de entrada conserva su token largo (elección
+  /// legítima UI-03, fuera de esta fila).
+  late final AnimationController _transSel = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.corta,
+    value: 1,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -135,15 +145,22 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
   @override
   void dispose() {
     _trazo.dispose();
+    _transSel.dispose();
     super.dispose();
   }
 
   @override
   void didUpdateWidget(GraficoMetricaGestion oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 1.36 H-C1 (136-387): se comparan fecha Y valor — con
+    // solo valores, una fecha nueva con el mismo valor
+    // dejaba la selección apuntando a otra fecha sin que
+    // el widget lo notara.
     if (!listEquals(
-        oldWidget.puntos.map((p) => p.valor).toList(),
-        widget.puntos.map((p) => p.valor).toList())) {
+        oldWidget.puntos
+            .map((p) => (p.fecha, p.valor))
+            .toList(),
+        widget.puntos.map((p) => (p.fecha, p.valor)).toList())) {
       _sel = null;
     }
   }
@@ -217,7 +234,8 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
                   height: 180,
                   width: double.infinity,
                   child: AnimatedBuilder(
-                    animation: _trazo,
+                    animation:
+                        Listenable.merge([_trazo, _transSel]),
                     builder: (context, _) => CustomPaint(
                       painter: _GraficoMetricaGestionPainter(
                         valores: valores,
@@ -228,6 +246,7 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
                         color: widget.color,
                         objetivo: widget.objetivo,
                         seleccion: selValido ? _sel : null,
+                        selFactor: _transSel.value,
                         progreso:
                             AppMovimiento.curvaSuave.transform(_trazo.value),
                       ),
@@ -271,6 +290,13 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
     if (i >= 0 && _sel != i) {
       // 1.36 H-B1 (136-398): cambiar de punto se siente.
       Tacto.seleccion();
+      // 1.36 H-C1 (136-397): y se SUAVIZA con el token
+      // corto (directo con «reducir movimiento»).
+      if (MediaQuery.of(context).disableAnimations) {
+        _transSel.value = 1;
+      } else {
+        _transSel.forward(from: 0);
+      }
       setState(() => _sel = i);
     }
   }
@@ -289,6 +315,10 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
   final double? objetivo;
   final int? seleccion;
 
+  /// 1.36 H-C1 (136-397): factor 0..1 de la transición del
+  /// punto seleccionado (radio y guía interpolados).
+  final double selFactor;
+
   /// 1.35 (UI-03): fracción 0..1 del trazado de entrada —
   /// la línea, el área y los puntos solo existen hasta
   /// ese corte horizontal (las guías rotuladas nacen
@@ -304,6 +334,7 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
     required this.color,
     this.objetivo,
     this.seleccion,
+    this.selFactor = 1,
     this.progreso = 1,
   });
 
@@ -334,7 +365,14 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
           ]) {
       final y = yDe(valor);
       _lineaPunteada(canvas, Offset(0, y), Offset(size.width, y), guiaPaint);
-      _rotuloGuia(canvas, rotulo, Offset(2, y - 4), size);
+      // 1.36 H-C1 (136-392): si este extremo ES el primer
+      // punto, su etiqueta (centrada sobre x≈0) pisaría el
+      // rótulo de la guía: el rótulo se desplaza a la
+      // derecha de la etiqueta.
+      final coincidePrimero =
+          valores.isNotEmpty && valor == valores.first && xs.first < 0.05;
+      _rotuloGuia(
+          canvas, rotulo, Offset(coincidePrimero ? 56 : 2, y - 4), size);
     }
 
     // 1.35 (UX-08): la banda del objetivo, con su
@@ -426,7 +464,7 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
         Offset(p.dx, padY - 8),
         Offset(p.dx, size.height - padY + 8),
         Paint()
-          ..color = color.withValues(alpha: 0.5)
+          ..color = color.withValues(alpha: 0.5 * selFactor)
           ..strokeWidth = 1
           ..style = PaintingStyle.stroke,
       );
@@ -438,8 +476,11 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
     for (var i = 0; i < puntos.length; i++) {
       final p = puntos[i];
       final esSel = i == seleccion;
-      canvas.drawCircle(p, esSel ? 7 : 5, bordePaint);
-      canvas.drawCircle(p, esSel ? 5.5 : 3.5, puntoPaint);
+      // 1.36 H-C1 (136-397): el radio del seleccionado se
+      // interpola con selFactor, no salta de 5 a 7.
+      canvas.drawCircle(p, esSel ? 5 + 2 * selFactor : 5, bordePaint);
+      canvas.drawCircle(
+          p, esSel ? 3.5 + 2 * selFactor : 3.5, puntoPaint);
     }
 
     // 6. Etiquetas del primer y último valor.
@@ -499,5 +540,6 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
       old.color != color ||
       old.objetivo != objetivo ||
       old.seleccion != seleccion ||
+      old.selFactor != selFactor ||
       old.progreso != progreso;
 }

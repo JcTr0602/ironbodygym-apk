@@ -36,11 +36,19 @@ class AvatarEntrenador extends StatefulWidget {
         final raw = await LocalDb.instance.getMeta('usuarios_apk');
         if (raw != null && raw.isNotEmpty) {
           for (final u in jsonDecode(raw) as List) {
-            final m = Map<String, dynamic>.from(u as Map);
-            final nom = '${m['nombre'] ?? ''}'.trim();
-            final user = '${m['username'] ?? ''}'.trim();
-            if (nom.isNotEmpty && user.isNotEmpty) {
-              mapa[normalizarNombreTurno(nom)] = user;
+            // 1.36 H-C1 (136-377): la entrada malformada se
+            // SALTA, no aborta el mapa entero (el cast de
+            // una fila mala lanzaba y el catch externo
+            // dejaba sin avatar a todos los demás).
+            try {
+              final m = Map<String, dynamic>.from(u as Map);
+              final nom = '${m['nombre'] ?? ''}'.trim();
+              final user = '${m['username'] ?? ''}'.trim();
+              if (nom.isNotEmpty && user.isNotEmpty) {
+                mapa[normalizarNombreTurno(nom)] = user;
+              }
+            } catch (_) {
+              continue;
             }
           }
         }
@@ -145,6 +153,19 @@ class _AvatarEntrenadorState extends State<AvatarEntrenador> {
                             2)
                         .round()),
                 backgroundColor: AppColores.borde(context),
+                // 1.36 H-C1 (136-384): la inicial vive como
+                // child — si la imagen falla al decodificar,
+                // el círculo enseña la inicial en vez de
+                // quedar plano y vacío.
+                onBackgroundImageError: (_, __) {},
+                child: Text(
+                  inicial,
+                  style: TextStyle(
+                    color: colorChipEntrenador(nombre),
+                    fontWeight: FontWeight.bold,
+                    fontSize: tamano * 0.42,
+                  ),
+                ),
               ),
             ),
           );

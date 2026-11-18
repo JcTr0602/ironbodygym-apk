@@ -12013,6 +12013,27 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// 1.36 H-C1 (136-331): marca de creación de la op
+  /// pendiente MÁS VIEJA (mismos estados que
+  /// [countPendingOps]); null si no hay pendientes o la
+  /// marca no se puede leer/parsear. La usa el aviso de
+  /// antigüedad de Home cuando nunca hubo un push: sin
+  /// ella, un teléfono que jamás subió no avisaba nunca
+  /// de sus horas con cambios sin subir.
+  Future<DateTime?> creadaTsOpPendienteMasVieja() async {
+    try {
+      final d = await db;
+      final r = await d.rawQuery(
+          'SELECT MIN(creada_ts) m FROM ops_queue WHERE estado IN '
+          "('pendiente', 'enviada', 'error')");
+      final m = r.first['m'];
+      if (m is! String || m.isEmpty) return null;
+      return DateTime.tryParse(m);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 1.29 (Oleada 6, D-16): ops que FALLARON al subir o
   /// esperan decisión (error, rechazada, necesita_revision)
   /// — el «falló» del aviso de estado de la Salud del sync.

@@ -11,8 +11,17 @@
 // de siempre para su llamador en la pestaña de progreso.
 import 'package:flutter/material.dart';
 
+import '../tiempo.dart';
 import 'grafico_metrica.dart';
 import 'pestana_progreso.dart';
+
+/// 1.36 H-C1 (136-400): validez de fecha de un punto de
+/// serie, UNA sola regla para los dos filtros: nada de
+/// época (antes de 2000) y nada del futuro (una fecha
+/// corrupta por delante de hoy aplastaba el eje igual
+/// que la de 1970).
+bool fechaPuntoSerieValida(DateTime f, DateTime ahora) =>
+    f.year >= 2000 && !f.isAfter(ahora);
 
 /// Yunque R5-M9-2/M9-4: los puntos de peso VÁLIDOS de la
 /// lista (peso > 0 y fecha no época). Es la serie que
@@ -25,7 +34,12 @@ List<PuntoSerie> puntosPesoValidos(List<Medicion> mediciones) => [
         // R5-M9-2: una fecha época (el respaldo de
         // «created_at corrupto» de la pestaña) tampoco: un
         // punto de 1970 aplastaba el eje contra ~56 años.
-        if (m.pesoKg != null && m.pesoKg! > 0 && m.createdAt.year >= 2000)
+        // 1.36 H-C1 (136-400): isFinite y cota de fecha —
+        // el MISMO filtro que serieMetricaOpcional.
+        if (m.pesoKg != null &&
+            m.pesoKg! > 0 &&
+            m.pesoKg!.isFinite &&
+            fechaPuntoSerieValida(m.createdAt, ahoraHabana()))
           PuntoSerie(m.createdAt, m.pesoKg!),
     ];
 
@@ -59,7 +73,7 @@ List<PuntoSerie> serieMetricaOpcional(
       if (valor(m) != null &&
           valor(m)! > 0 &&
           valor(m)!.isFinite &&
-          m.createdAt.year >= 2000)
+          fechaPuntoSerieValida(m.createdAt, ahoraHabana()))
         PuntoSerie(m.createdAt, valor(m)!),
   ];
 }

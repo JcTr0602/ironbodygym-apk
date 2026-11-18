@@ -1081,6 +1081,10 @@ class _HomeScreenState extends State<HomeScreen>
         clientesActivos().then((rows) => conteosDeBuscar(rows
             .where((c) => !esVistaProtegida(c))
             .toList())['aldia'] ?? 0), // 22
+        // 1.36 H-C1 (136-331): marca de la op pendiente más
+        // vieja — referencia del aviso de antigüedad cuando
+        // nunca hubo un push que la ancle.
+        LocalDb.instance.creadaTsOpPendienteMasVieja(), // 23
       ]);
       // Cliente protegido (2026-10-26, Protegido 2 H6): los
       // contadores de la principal no cuentan protegidos para un
@@ -1165,11 +1169,17 @@ class _HomeScreenState extends State<HomeScreen>
           : (await miTurnoHoy(_auth.telegramId, fecha: fechaCobro)).$1;
       // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
       String? aviso;
-      if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
+      // 1.36 H-C1 (136-331): la referencia ya no exige un
+      // push previo — sin push manda la op pendiente más
+      // vieja (res[23]); los pendientes sin ninguna marca
+      // legible siguen sin aviso de horas (no se inventa).
+      final refAviso = referenciaAntiguedadPendientes(
+          ultimaPush: det.ultimaPush as DateTime?,
+          opMasVieja: res[23] as DateTime?);
+      if (quiereAviso && porSubir > 0 && refAviso != null) {
         // H-05: diferencia entre instantes, en UTC (no el reloj
         // local crudo del teléfono).
-        final horas =
-            ahoraUtcReal().difference(det.ultimaPush!).inHours;
+        final horas = ahoraUtcReal().difference(refAviso).inHours;
         if (horas >= horasUmbral) {
           aviso = '⏳ Llevas $horas h sin subir cambios';
         }

@@ -266,10 +266,121 @@ Future<void> main() async {
   // v1.3.0 (Gemini #4): verificar cierre anormal previo.
   await _pasoArranqueDegradable(
       'centinela', CentinelaApp.verificarArranque);
-  await Supabase.initialize(
-    url: AppConfig.supabaseUrl,
-    publishableKey: AppConfig.anonKey,
-  );
+  // 1.36 H-C1 (136-327): el arranque mínimo va envuelto —
+  // si Supabase.initialize lanza ANTES de runApp, la app ya
+  // no muere en silencio: se pinta una pantalla de error
+  // con Reintentar que repite SOLO este paso y, si sale,
+  // continúa el arranque normal. (Sin timeout a propósito:
+  // el motivo R4-M1-5 de arriba sigue mandando.)
+  try {
+    await Supabase.initialize(
+      url: AppConfig.supabaseUrl,
+      publishableKey: AppConfig.anonKey,
+    );
+  } catch (e) {
+    debugPrint('[arranque] Supabase.initialize falló: $e');
+    runApp(PantallaErrorArranque(
+      detalle: '$e',
+      alReintentar: () async {
+        await Supabase.initialize(
+          url: AppConfig.supabaseUrl,
+          publishableKey: AppConfig.anonKey,
+        );
+        await _seguirArranque();
+      },
+    ));
+    return;
+  }
+  await _seguirArranque();
+}
+
+/// Pantalla mínima de arranque fallido (1.36 H-C1,
+/// 136-327): sin sesión ni datos, solo el aviso y el
+/// reintento del paso que lanzó. Si el reintento también
+/// falla, la pantalla se queda con el nuevo detalle.
+class PantallaErrorArranque extends StatefulWidget {
+  final String detalle;
+  final Future<void> Function() alReintentar;
+  const PantallaErrorArranque(
+      {super.key, required this.detalle, required this.alReintentar});
+
+  @override
+  State<PantallaErrorArranque> createState() =>
+      _PantallaErrorArranqueState();
+}
+
+class _PantallaErrorArranqueState extends State<PantallaErrorArranque> {
+  bool _reintentando = false;
+  String? _detalle;
+
+  Future<void> _reintentar() async {
+    if (_reintentando) return;
+    setState(() => _reintentando = true);
+    try {
+      await widget.alReintentar();
+      // Éxito: _seguirArranque ya llamó a runApp con la app
+      // real y esta pantalla desaparece.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _reintentando = false;
+        _detalle = '$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Icon(Icons.cloud_off_rounded, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  'La app no pudo arrancar',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Falló la conexión inicial con el servidor. '
+                  'Revisa la conexión y reinténtalo.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _detalle ?? widget.detalle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _reintentando ? null : _reintentar,
+                  child: Text(
+                      _reintentando ? 'Reintentando…' : 'Reintentar'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Todo el arranque que cuelga de un Supabase ya
+/// inicializado (extraído de main en 1.36 H-C1, 136-327,
+/// para que el reintento de la pantalla de error continúe
+/// exactamente por el mismo camino).
+Future<void> _seguirArranque() async {
   // v1.2.9+46 (AppLog): arranque con versión para forense.
   AppLog.info('app', 'inicio', d: 'IronBody Gym ${AppConfig.appVersion}');
   await _pasoArranqueDegradable('tema', ThemeController.load);

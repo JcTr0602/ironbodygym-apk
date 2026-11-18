@@ -107,13 +107,17 @@ class ThemeController {
   }
 
   /// Rota sistema → claro → oscuro → sistema (botón de la cabecera).
+  /// 1.36 H-C1 (136-328): avanza desde [mode] — la fuente
+  /// VISIBLE — y persiste después vía [setTema]; antes releía
+  /// el valor guardado y, si el guardado divergía del visible
+  /// (p. ej. un setTema a medias), el ciclo saltaba desde un
+  /// tema que el usuario no estaba viendo.
   static Future<void> ciclo() async {
-    final actual = await PerfilService.instance.getTema();
-    final sig = actual == 'sistema'
-        ? 'claro'
-        : actual == 'claro'
-            ? 'oscuro'
-            : 'sistema';
+    final sig = switch (mode.value) {
+      ThemeMode.system => 'claro',
+      ThemeMode.light => 'oscuro',
+      ThemeMode.dark => 'sistema',
+    };
     await setTema(sig);
   }
 }

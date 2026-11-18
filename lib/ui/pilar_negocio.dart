@@ -83,6 +83,15 @@ class _PilarNegocioState extends State<PilarNegocio> {
   late String _tab = widget.esDueno ? 'caja' : 'entregar';
   final Set<String> _visitados = {};
 
+  /// 1.36 H-C1 (136-340): señal de refresco de la pestaña
+  /// Caja — se incrementa al VOLVER a la pestaña y al
+  /// regresar de una pantalla enlazada desde ella; la
+  /// pestaña recarga sus pendientes al oírla (antes solo
+  /// cargaba al montar y tras su propia liquidación, y una
+  /// sync o un cobro hecho en otra pantalla la dejaban con
+  /// la foto vieja).
+  final ValueNotifier<int> _refrescoCaja = ValueNotifier(0);
+
   List<({String id, String titulo, IconData icono})> get _tabs =>
       widget.esDueno
           ? const [
@@ -111,6 +120,7 @@ class _PilarNegocioState extends State<PilarNegocio> {
   @override
   void dispose() {
     MarcoNav.destinoNegocio.removeListener(_aplicarDestino);
+    _refrescoCaja.dispose();
     super.dispose();
   }
 
@@ -127,6 +137,7 @@ class _PilarNegocioState extends State<PilarNegocio> {
       _tab = destino;
       _visitados.add(destino);
     });
+    if (destino == 'caja') _refrescoCaja.value++;
   }
 
   void _ir(Widget pantalla) {
@@ -136,7 +147,11 @@ class _PilarNegocioState extends State<PilarNegocio> {
   Widget _vistaDe(String tab) {
     switch (tab) {
       case 'caja':
-        return _TabCaja(onIr: _ir);
+        return _TabCaja(
+          onIr: _ir,
+          refresco: _refrescoCaja,
+          alVolverDePantalla: () => _refrescoCaja.value++,
+        );
       case 'nomina':
         return Column(
           children: [
@@ -358,6 +373,9 @@ class _PilarNegocioState extends State<PilarNegocio> {
                   _tab = s.first;
                   _visitados.add(s.first);
                 });
+                // 1.36 H-C1 (136-340): volver a Caja recarga
+                // sus pendientes.
+                if (s.first == 'caja') _refrescoCaja.value++;
               },
             ),
           ),
@@ -389,7 +407,14 @@ class _PilarNegocioState extends State<PilarNegocio> {
 class _TabCaja extends StatefulWidget {
   final void Function(Widget pantalla) onIr;
 
-  const _TabCaja({required this.onIr});
+  /// 1.36 H-C1 (136-340): señal externa de refresco
+  /// (volver a la pestaña) y aviso de regreso de una
+  /// pantalla enlazada.
+  final ValueNotifier<int>? refresco;
+  final VoidCallback? alVolverDePantalla;
+
+  const _TabCaja(
+      {required this.onIr, this.refresco, this.alVolverDePantalla});
 
   @override
   State<_TabCaja> createState() => _TabCajaState();
@@ -404,6 +429,26 @@ class _TabCajaState extends State<_TabCaja> {
   void initState() {
     super.initState();
     _cargar();
+    // 1.36 H-C1 (136-340): recargar al volver a la pestaña.
+    widget.refresco?.addListener(_alRefrescoExterno);
+  }
+
+  @override
+  void dispose() {
+    widget.refresco?.removeListener(_alRefrescoExterno);
+    super.dispose();
+  }
+
+  void _alRefrescoExterno() {
+    if (mounted) _cargar();
+  }
+
+  /// Enlace de Caja con regreso: al cerrar la pantalla
+  /// enlazada, la pestaña se refresca (136-340).
+  Future<void> _irYRefrescar(Widget pantalla) async {
+    await Navigator.of(context)
+        .push(RutaIron(builder: (_) => pantalla));
+    widget.alVolverDePantalla?.call();
   }
 
   Future<void> _cargar() async {
@@ -553,19 +598,19 @@ class _TabCajaState extends State<_TabCaja> {
         const EncabezadoSeccion(titulo: 'CAJA Y ARQUEO'),
         _enlace('Arqueo: detalle e historial',
             'Expedientes de diferencia y liquidaciones pasadas',
-            Icons.fact_check_rounded, () => widget.onIr(const ArqueoScreen())),
+            Icons.fact_check_rounded, () => _irYRefrescar(const ArqueoScreen())),
         _enlace('Historial de caja', 'Cierres y arqueos por fecha',
             Icons.history_rounded,
-            () => widget.onIr(const HistorialCajaScreen())),
+            () => _irYRefrescar(const HistorialCajaScreen())),
         _enlace('Diferencias de caja', 'Expedientes abiertos por diferencia',
             Icons.report_problem_rounded,
-            () => widget.onIr(const DiferenciasCajaScreen())),
+            () => _irYRefrescar(const DiferenciasCajaScreen())),
         _enlace('Conciliación de transferencias',
             'Transferencias por comprobar', Icons.compare_arrows_rounded,
-            () => widget.onIr(const ConciliacionScreen())),
+            () => _irYRefrescar(const ConciliacionScreen())),
         _enlace('Gastos', 'Registrar y ver los gastos del gym',
             Icons.money_off_rounded,
-            () => widget.onIr(const GastosScreen())),
+            () => _irYRefrescar(const GastosScreen())),
       ],
     );
   }
