@@ -576,9 +576,19 @@ class _ListasScreenState extends State<ListasScreen>
         child: Row(
           children: [
             for (final v in _vistas) ...[
+              // 1.36 H-B2 (136-586): el nombre largo se corta
+              // con ellipsis y el alcance completo vive en el
+              // tooltip (antes el chip crecía sin límite).
               InputChip(
                 materialTapTargetSize: MaterialTapTargetSize.padded,
-                label: Text('${v.nombre} · ${v.alcance}'),
+                label: Tooltip(
+                  message: '${v.nombre} · ${v.alcance}',
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 180),
+                    child: Text('${v.nombre} · ${v.alcance}',
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
                 selected: v.coincideCon(
                     pestana: _tab.index,
                     orden: _orden,
@@ -2054,9 +2064,24 @@ class _NumeroAnimadoState extends State<_NumeroAnimado>
     if (MediaQuery.of(context).disableAnimations) {
       return widget.builder(context, widget.valor);
     }
-    return AnimatedBuilder(
-      animation: _anim,
-      builder: (ctx, _) => widget.builder(ctx, _anim.value),
+    // 1.36 H-B2 (136-587): el ancho de la pestaña queda
+    // RESERVADO por el rótulo final (invisible debajo): el
+    // contador anima sin que la barra baile de ancho.
+    return Stack(
+      alignment: Alignment.centerLeft,
+      children: [
+        Visibility(
+          visible: false,
+          maintainSize: true,
+          maintainState: true,
+          maintainAnimation: true,
+          child: widget.builder(context, widget.valor),
+        ),
+        AnimatedBuilder(
+          animation: _anim,
+          builder: (ctx, _) => widget.builder(ctx, _anim.value),
+        ),
+      ],
     );
   }
 }
@@ -2098,15 +2123,18 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
         CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      // 1.36 H-B2 (136-587): con «Reducir movimiento» la
+      // salida se completa tras ESTE frame, sin esperar los
+      // 520 ms del sello.
+      if (MediaQuery.of(context).disableAnimations) {
+        _completar();
+        return;
+      }
       setState(() => _sello = true);
       _temporizadorSalida =
           Timer(const Duration(milliseconds: 520), () {
         if (!mounted) return;
-        if (MediaQuery.of(context).disableAnimations) {
-          _completar();
-        } else {
-          _ctrl.forward().whenComplete(_completar);
-        }
+        _ctrl.forward().whenComplete(_completar);
       });
     });
   }
@@ -2217,7 +2245,9 @@ class _DialogoNombreVistaState extends State<_DialogoNombreVista> {
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
-        TextButton(
+        // 1.36 H-B2 (136-586): la acción principal del
+        // diálogo es un FilledButton, no un texto más.
+        FilledButton(
             onPressed: _guardar,
             child: const Text('Guardar')),
       ],

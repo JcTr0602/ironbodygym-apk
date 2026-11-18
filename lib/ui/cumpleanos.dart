@@ -511,8 +511,16 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                     : TabBarView(
                     controller: _tabs,
                     children: [
-                      _lista(_proximos, 'próximos 7 días'),
-                      _lista(_mes, 'este mes'),
+                      // 1.36 H-B2 (136-591): frases COMPLETAS
+                      // por pestaña (antes se interpolaba
+                      // «en los $etiqueta» y salía «en los
+                      // este mes»).
+                      _lista(_proximos,
+                          vacio: 'en los próximos 7 días',
+                          conteo: 'en los próximos 7 días'),
+                      _lista(_mes,
+                          vacio: 'en este mes',
+                          conteo: 'este mes'),
                     ],
                   ),
           ),
@@ -521,12 +529,13 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     );
   }
 
-  Widget _lista(List<Map<String, dynamic>> items, String etiqueta) {
+  Widget _lista(List<Map<String, dynamic>> items,
+      {required String vacio, required String conteo}) {
     if (items.isEmpty) {
       return EstadoVacio(
         ilustracion: 'assets/vacio_pastel.webp',
         icono: Icons.cake_rounded,
-        titulo: 'Sin cumpleaños en los $etiqueta.',
+        titulo: 'Sin cumpleaños $vacio.',
         subtitulo: 'La fecha sale del carnet de identidad.',
         textoAccion: 'Actualizar',
         onAccion: _cargar,
@@ -546,7 +555,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             return Padding(
               padding: const EdgeInsets.all(AppEspacio.md),
               child: Text(
-                '$fel de ${items.length} felicitados en los $etiqueta',
+                '$fel de ${items.length} felicitados $conteo',
                 style: AppTexto.secundario.copyWith(
                     color: AppColores.textoSecundario(context)),
               ),
@@ -571,9 +580,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     // Panel Terra B3: antes se comparaba solo el día del mes y
     // un cumpleaños del 30 de noviembre destacaba el 30 de octubre.
     final esHoy = diasPara == 0;
-    return Opacity(
-      opacity: felicitado ? 0.6 : 1.0,
-      child: Container(
+    // 1.36 H-B2 (136-592): el felicitado se dice con un chip
+    // «Felicitado», no bajando la opacidad de toda la tarjeta
+    // (ilegible y sin contraste garantizado).
+    return Container(
         decoration: esHoy
             ? BoxDecoration(
                 color: AppColores.alerta.withValues(alpha: 0.12),
@@ -585,6 +595,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             : null,
         child: FilaCliente(
         cliente: c,
+        avisoChip: felicitado ? 'Felicitado' : null,
         onTap: () => Navigator.of(context)
             .push(RutaIron(
                 builder: (_) => FichaScreen(clienteId: id)))
@@ -676,7 +687,6 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             ),
           ],
         ),
-      ),
       ),
     );
   }

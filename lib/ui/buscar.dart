@@ -25,6 +25,7 @@ import 'app_bar.dart';
 import 'diagnostico_espejo_card.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
+import 'skeleton.dart';
 import 'dialogo_pago.dart';
 import 'hoja_accion.dart';
 import 'pago_diario.dart';
@@ -118,6 +119,10 @@ class _BuscarScreenState extends State<BuscarScreen>
   // Yunque de cambios 1.31 (M1): pausados en curso de la
   // última búsqueda (para el chip/anillo de la fila).
   Set<int> _pausados = {};
+  // 1.36 H-B2 (136-603): ids que YA se animaron al entrar:
+  // una fila nueva anima una vez; las conocidas no repiten
+  // el fundido en cada búsqueda.
+  final Set<int> _idsAnimados = {};
   // 1.25 T116 (F1-55): ids con aviso de WhatsApp YA
   // registrado hoy (el registro del día de la bandeja):
   // la fila lo enseña y el flujo en lote los salta.
@@ -331,9 +336,26 @@ class _BuscarScreenState extends State<BuscarScreen>
   Timer? _debounceBusqueda;
 
   void _buscarConDebounce() {
+    // 1.36 H-B2 (136-605): al cambiar la consulta, la
+    // selección anterior deja de tener sentido (sus filas
+    // pueden ni estar): se limpia en vez de quedar invisible
+    // con el contador vivo en otra lista.
+    if (_seleccionados.isNotEmpty) {
+      setState(() {
+        _seleccionados.clear();
+        _modoSeleccion = false;
+      });
+    }
     _debounceBusqueda?.cancel();
     _debounceBusqueda =
         Timer(const Duration(milliseconds: 200), _buscar);
+  }
+
+  void _limpiarSeleccionPorFiltro() {
+    if (_seleccionados.isNotEmpty) {
+      _seleccionados.clear();
+      _modoSeleccion = false;
+    }
   }
 
   Future<void> _buscar() async {
@@ -558,11 +580,21 @@ class _BuscarScreenState extends State<BuscarScreen>
   bool get _sinVerificar => _ultimoPull == null || _syncFalloVigente;
 
   Widget _vacioBuscar() {
+    // 1.36 H-B2 (136-598): antes de la primera búsqueda no
+    // hay vacío que afirmar: esqueleto de carga.
+    if (!_busco) {
+      return const Padding(
+        padding: EdgeInsets.all(AppEspacio.lg),
+        child: SkeletonLista(items: 3),
+      );
+    }
     final totalEspejo = _conteos['todos'] ?? 0;
     final conFiltros = _filtro != 'todos' || _rangoEdad != 'todas';
+    // 136-598: «sin verificar» se evalúa ANTES que la rama de
+    // filtros (con filtros activos y espejo sin verificar, el
+    // vacío culpaba al filtro de un espejo que no bajó).
     if (_busco &&
         totalEspejo == 0 &&
-        !conFiltros &&
         _q.text.trim().isEmpty &&
         _sinVerificar) {
       // SL-X2 (G02-2): sin verificar NO se invita a
@@ -638,16 +670,18 @@ class _BuscarScreenState extends State<BuscarScreen>
   /// las acciones configuradas (vacío en una dirección =
   /// esa dirección no hace nada y no se nombra).
   String _textoAvisoSwipe() {
+    // 1.36 H-B2 (136-602): el rótulo dice la dirección de
+    // cada acción configurada («→ Cobrar · ← Venta»).
     final partes = <String>[
       if (_etiquetaSwipeAccion(_swipeDer).isNotEmpty)
-        _etiquetaSwipeAccion(_swipeDer),
+        '→ ${_etiquetaSwipeAccion(_swipeDer)}',
       if (_etiquetaSwipeAccion(_swipeIzq).isNotEmpty)
-        _etiquetaSwipeAccion(_swipeIzq),
+        '← ${_etiquetaSwipeAccion(_swipeIzq)}',
     ];
     if (partes.isEmpty) {
       return 'Desliza una fila para ver sus acciones';
     }
-    return 'Desliza una fila → ${partes.join(' · ')}';
+    return 'Desliza una fila: ${partes.join(' · ')}';
   }
 
   /// 1.24.2: aplica el orden elegido a la lista ya filtrada.
@@ -704,7 +738,22 @@ class _BuscarScreenState extends State<BuscarScreen>
   }
 
   /// Botón "Actualizar": baja cambios del servidor y recarga la lista.
+  // 1.36 H-B2 (136-604): actualización en curso — el botón
+  // de refresco se liga a este estado (progreso + disabled)
+  // y un segundo toque no duplica la corrida.
+  bool _actualizando = false;
+
   Future<void> _actualizar() async {
+    if (_actualizando) return;
+    setState(() => _actualizando = true);
+    try {
+      await _actualizarFlujo();
+    } finally {
+      if (mounted) setState(() => _actualizando = false);
+    }
+  }
+
+  Future<void> _actualizarFlujo() async {
     // v1.3.1: manejar fallo de red (offline-first en Cuba).
     try {
       // 1.34 Campo 2 (P-7): regla de Jc — con datos
@@ -717,7 +766,9 @@ class _BuscarScreenState extends State<BuscarScreen>
         await _refrescarSello();
         await _buscar();
         if (!mounted) return;
-        mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
+        // 136-604: copy honesto — en la rama local no bajó
+        // nada: la lista se RELEYÓ, no se actualizó.
+        mostrarSnack(context, 'Lista releída', significado: SignificadoChip.exito);
         return;
       }
       final res = await SyncEngine.instance.pull();
@@ -806,8 +857,16 @@ class _BuscarScreenState extends State<BuscarScreen>
         acciones: [
           IconButton(
             tooltip: 'Actualizar (bajar cambios)',
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _actualizar,
+            // 136-604: ligado a _actualizando (spinner y
+            // deshabilitado durante la corrida).
+            icon: _actualizando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            onPressed: _actualizando ? null : _actualizar,
           ),
         ],
       ),
@@ -1100,11 +1159,26 @@ class _BuscarScreenState extends State<BuscarScreen>
                   children: [
                     const EncabezadoSeccion(titulo: 'RECIENTES'),
                     for (final c in _recientes)
-                      FilaCliente(
-                        cliente: c,
-                        compacta: true,
-                        desambiguar: !esVistaProtegida(c),
-                        onTap: () => _abrirFichaReciente(c),
+                      // 136-602: el mismo contenedor (Card con
+                      // el radio de la casa) que las filas de
+                      // resultados, no una fila suelta.
+                      Card(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.md,
+                            vertical: AppEspacio.xs),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.md),
+                          side: BorderSide(
+                              color: AppColores.borde(context)),
+                        ),
+                        child: FilaCliente(
+                          cliente: c,
+                          compacta: true,
+                          desambiguar: !esVistaProtegida(c),
+                          onTap: () => _abrirFichaReciente(c),
+                        ),
                       ),
                   ],
                 ),
@@ -1161,12 +1235,21 @@ class _BuscarScreenState extends State<BuscarScreen>
                 ),
               SliverList.builder(
                 itemCount: _res.length,
-                itemBuilder: (context, i) =>
-                    // Higiene (Argón): el escalonado se acota
-                    // a la ventana inicial pasándole el índice
-                    // (sin él, TODAS las filas animaban).
-                    FadeEntrada(
-                        indice: i, child: _filaResultado(context, i)),
+                itemBuilder: (context, i) {
+                  // 136-603: clave estable por id y fundido
+                  // SOLO la primera vez que el id aparece.
+                  final cid = (_res[i]['id'] as num?)?.toInt();
+                  final fila = _filaResultado(context, i);
+                  if (cid == null || _idsAnimados.contains(cid)) {
+                    return KeyedSubtree(
+                        key: ValueKey('buscar-fila-$cid'), child: fila);
+                  }
+                  _idsAnimados.add(cid);
+                  return FadeEntrada(
+                      key: ValueKey('buscar-fila-$cid'),
+                      indice: i,
+                      child: fila);
+                },
               ),
             ],
           ],
@@ -1213,8 +1296,7 @@ class _BuscarScreenState extends State<BuscarScreen>
       child: FilaCliente(
         cliente: c,
         diasRestantesPre: diasFila,
-        enPausa: cidFila != null &&
-            _pausados.contains(cidFila),
+        enPausa: cidFila != null && _enPausaFila(c),
         origenHero: 'buscar',
         compacta: _compacta,
         // 1.25 T116 (F1-55): rastro
@@ -1265,12 +1347,27 @@ class _BuscarScreenState extends State<BuscarScreen>
             c,
             dias: diasFila,
             protegido: protegidoFila),
+        // 1.36 H-B2 (136-605): el menú rápido (antes solo por
+        // pulsación larga, invisible) tiene affordance
+        // persistente en las filas sin botón de WhatsApp.
+        trailing: (_modoSeleccion ||
+                protegidoFila ||
+                (telWaFila &&
+                    !esCuentaCasa(c) &&
+                    !_enPausaFila(c) &&
+                    (diasFila == null || diasFila <= 7)))
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.more_vert_rounded),
+                tooltip: 'Acciones rápidas',
+                onPressed: () => _menuRapido(c),
+              ),
         accionWhatsapp: (!_modoSeleccion &&
                 !protegidoFila &&
                 !esCuentaCasa(c) &&
                 // Yunque 1.34 (C5-1): sin aviso de vencimiento
                 // a quien está en pausa aprobada en curso.
-                !_pausados.contains(cidFila) &&
+                !_enPausaFila(c) &&
                 telWaFila &&
                 (diasFila == null ||
                     diasFila <= 7))
@@ -1343,12 +1440,18 @@ class _BuscarScreenState extends State<BuscarScreen>
       // La fila nunca se borra: la acción
       // se ejecuta y la fila se queda.
       confirmDismiss: (d) async {
+        // 1.36 H-B2 (136-599): se devuelve false DE INMEDIATO
+        // y la acción corre tras el frame (antes el gesto
+        // esperaba a que la acción terminara para soltar la
+        // fila, con la fila colgando a medio deslizar).
         final accion = d ==
                 DismissDirection
                     .startToEnd
             ? _swipeDer
             : _swipeIzq;
-        await _ejecutarSwipe(accion, c);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(_ejecutarSwipe(accion, c));
+        });
         return false;
       },
       child: fila,
@@ -1380,10 +1483,11 @@ class _BuscarScreenState extends State<BuscarScreen>
         color = AppColores.naranja;
         icono = Icons.shopping_bag_rounded;
       case 'editar':
-        color = Colors.grey;
+        // 136-602: token de contraste de la casa, no Colors.grey.
+        color = AppColores.textoSecundario(context);
         icono = Icons.edit_rounded;
       default:
-        color = Colors.grey;
+        color = AppColores.textoSecundario(context);
         icono = Icons.block_rounded;
     }
     return Container(
@@ -1478,6 +1582,15 @@ class _BuscarScreenState extends State<BuscarScreen>
     });
   }
 
+  /// 1.36 H-B2 (136-601): EL predicado de pausa de Buscar —
+  /// aprobadas en curso (_pausados) O legado 'congelado' en
+  /// el estado del cliente. Lo usan la fila, su botón de
+  /// WhatsApp, _abrirWhatsapp y la cadena de avisos (antes
+  /// cada sitio miraba solo una de las dos fuentes).
+  bool _enPausaFila(Map<String, dynamic> c) =>
+      _pausados.contains((c['id'] as num?)?.toInt()) ||
+      (c['estado'] as String?) == 'congelado';
+
   /// Abre WhatsApp con el aviso que corresponde al estado del
   /// cliente (o el chat pelado si no hace falta aviso).
   Future<void> _abrirWhatsapp(Map<String, dynamic> c,
@@ -1491,7 +1604,10 @@ class _BuscarScreenState extends State<BuscarScreen>
       final congelados = await CongelacionesService.instance
           .idsCongeladosEnCurso(ahoraHabana());
       if (!mounted) return;
-      if (cid != null && congelados.contains(cid)) {
+      // 136-601: también el legado 'congelado', no solo las
+      // aprobadas que devuelve el servicio.
+      if ((cid != null && congelados.contains(cid)) ||
+          (c['estado'] as String?) == 'congelado') {
         mostrarSnack(
             context,
             'Este cliente está en pausa (congelación aprobada): '
@@ -1868,8 +1984,7 @@ class _BuscarScreenState extends State<BuscarScreen>
       tieneTelefonoWa: telefonoEfectivoWa(c).isNotEmpty,
       // Yunque 2.34 (D-4): pausa en curso (sistema nuevo) o
       // congelado legado: sin acción fantasma.
-      enPausa: _pausados.contains((c['id'] as num?)?.toInt()) ||
-          (c['estado'] as String?) == 'congelado',
+      enPausa: _enPausaFila(c),
     );
     return switch (cual) {
       'cobrar' => (
@@ -1942,6 +2057,8 @@ class _BuscarScreenState extends State<BuscarScreen>
       // objetivo táctil acolchado de 48.
       materialTapTargetSize: MaterialTapTargetSize.padded,
       onSelected: (_) {
+        // 136-605: cambiar el filtro también limpia la selección.
+        _limpiarSeleccionPorFiltro();
         setState(() => _filtro = valor);
         _buscar();
       },
@@ -1958,6 +2075,7 @@ class _BuscarScreenState extends State<BuscarScreen>
       // densidad compacta y con objetivo de 48.
       materialTapTargetSize: MaterialTapTargetSize.padded,
       onSelected: (_) {
+        _limpiarSeleccionPorFiltro();
         setState(() => _rangoEdad = valor);
         _buscar();
       },
@@ -2302,7 +2420,15 @@ class _FilaClienteState extends State<_FilaCliente> {
                     style:
                         AppTexto.subtitulo),
               ),
-              const Icon(Icons.lock_rounded, color: AppColores.naranja),
+              // 1.36 H-B2 (136-602): el candado se anuncia.
+              Tooltip(
+                message: 'Cliente protegido',
+                child: Semantics(
+                  label: 'Cliente protegido',
+                  child: Icon(Icons.lock_rounded,
+                      color: AppColores.naranja),
+                ),
+              ),
             ],
           ),
         ),
