@@ -177,21 +177,132 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
     }
   }
 
-  String _detalleFila(Map<String, dynamic> f) {
-    final partes = <String>[];
-    final mensaje = '${f['mensaje'] ?? ''}'.trim();
-    if (mensaje.isNotEmpty) partes.add('«$mensaje»');
+  /// 1.36 CAMPO C-1: la caducidad de una fila como pieza
+  /// propia de su tarjeta (antes iba fundida en una línea
+  /// de detalle con el mensaje). Misma lectura de
+  /// `expira_ts` y misma conversión a hora de La Habana.
+  String _caducidadFila(Map<String, dynamic> f) {
     final expira = DateTime.tryParse('${f['expira_ts'] ?? ''}');
-    if (expira != null) {
-      final h = aHabana(expira);
-      partes.add('caduca el ${h.day.toString().padLeft(2, '0')}/'
-          '${h.month.toString().padLeft(2, '0')} '
-          '${h.hour.toString().padLeft(2, '0')}:'
-          '${h.minute.toString().padLeft(2, '0')}');
-    } else {
-      partes.add('sin caducidad');
-    }
-    return partes.join(' · ');
+    if (expira == null) return 'Sin caducidad';
+    final h = aHabana(expira);
+    return 'Caduca el ${h.day.toString().padLeft(2, '0')}/'
+        '${h.month.toString().padLeft(2, '0')} · '
+        '${h.hour.toString().padLeft(2, '0')}:'
+        '${h.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 1.36 CAMPO C-1: la tarjeta de estado que abre la
+  /// pantalla — el estado manda: si hay candado (y de
+  /// quién) o si todo está abierto, antes que el
+  /// formulario. Solo composición sobre el `_activos`
+  /// de siempre; la mecánica no se toca.
+  Widget _tarjetaEstado(BuildContext context) {
+    final pausado = _activos.isNotEmpty;
+    return Tarjeta(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (pausado)
+            IconoModuloBadge.naranja(Icons.lock_rounded)
+          else
+            IconoModuloBadge.verde(Icons.lock_open_rounded),
+          const SizedBox(width: AppEspacio.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  pausado ? 'Acceso pausado' : 'Acceso abierto',
+                  style: AppTexto.titulo,
+                ),
+                const SizedBox(height: AppEspacio.xs),
+                Text(
+                  pausado
+                      ? _activos.length == 1
+                          ? 'Hay 1 candado activo: '
+                              '${_tituloFila(_activos.first)}.'
+                          : 'Hay ${_activos.length} candados '
+                              'activos ahora mismo.'
+                      : 'Ningún candado activo: todas las apps '
+                          'están abiertas ahora mismo.',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          ChipEstado.semantico(
+            texto: pausado ? 'Pausado' : 'Abierto',
+            significado: pausado
+                ? SignificadoChip.alerta
+                : SignificadoChip.exito,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 1.36 CAMPO C-1: cada candado activo como tarjeta
+  /// propia — alcance como título, su mensaje, su
+  /// caducidad y el levantar a un toque (el mismo
+  /// `_quitar` de siempre, con su confirmación).
+  Widget _tarjetaCandadoActivo(
+      BuildContext context, Map<String, dynamic> f) {
+    final mensaje = '${f['mensaje'] ?? ''}'.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
+      child: Tarjeta(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconoModuloBadge.naranja(Icons.lock_rounded),
+                const SizedBox(width: AppEspacio.md),
+                Expanded(
+                  child: Text(_tituloFila(f),
+                      style: AppTexto.subtitulo),
+                ),
+                const ChipEstado.semantico(
+                  texto: 'Activo',
+                  significado: SignificadoChip.alerta,
+                ),
+              ],
+            ),
+            if (mensaje.isNotEmpty) ...[
+              const SizedBox(height: AppEspacio.sm),
+              Text('«$mensaje»', style: AppTexto.cuerpo),
+            ],
+            const SizedBox(height: AppEspacio.sm),
+            Row(
+              children: [
+                Icon(Icons.schedule_rounded,
+                    size: 16,
+                    color: AppColores.textoSecundario(context)),
+                const SizedBox(width: AppEspacio.xs),
+                Expanded(
+                  child: Text(_caducidadFila(f),
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.textoSecundario(
+                              context))),
+                ),
+                // BotonSecundario es de ancho completo:
+                // en la fila va acotado, como antes.
+                SizedBox(
+                  width: 128,
+                  child: BotonSecundario(
+                    texto: 'Quitar',
+                    icono: Icons.lock_open_rounded,
+                    onPressed: () => _quitar(f),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _enviarOp(Map<String, dynamic> payload) async {
@@ -426,59 +537,50 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
               : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
-                Text(
-                  'Pausa temporal del acceso sin cerrar sesiones. '
-                  'El candado llega a cada teléfono cuando '
-                  'sincroniza; el servidor además retiene las '
-                  'operaciones de quien esté pausado.',
-                  style: AppTexto.secundario.copyWith(
-                      color: AppColores.textoSecundario(context)),
-                ),
-                const EncabezadoSeccion(titulo: 'Candados activos'),
-                if (_activos.isEmpty)
-                  const EstadoVacio(
-                    icono: Icons.lock_open_rounded,
-                    titulo: 'Ningún candado activo',
-                    subtitulo:
-                        'Todas las apps están abiertas ahora mismo.',
-                  )
-                else
+                // 1.36 CAMPO C-1: el estado abre la pantalla
+                // (tarjeta protagonista); sin candados no hay
+                // sección de activos que pintar (regla de
+                // Jc: lo que está en cero no aparece).
+                _tarjetaEstado(context),
+                if (_activos.isNotEmpty) ...[
+                  const EncabezadoSeccion(
+                      titulo: 'Candados activos'),
                   for (final f in _activos)
-                    Tarjeta(
-                      child: Row(
+                    _tarjetaCandadoActivo(context, f),
+                ],
+                const EncabezadoSeccion(titulo: 'Aplicar un candado'),
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 1.36 CAMPO C-1: cabecera propia del
+                      // formulario — deja de leerse como una
+                      // caja genérica de campos sueltos.
+                      Row(
                         children: [
-                          const Icon(Icons.lock_rounded),
+                          IconoModuloBadge.naranja(
+                              Icons.lock_rounded),
                           const SizedBox(width: AppEspacio.md),
                           Expanded(
                             child: Column(
                               crossAxisAlignment:
                                   CrossAxisAlignment.start,
                               children: [
-                                Text(_tituloFila(f),
+                                const Text('Nuevo candado',
                                     style: AppTexto.subtitulo),
-                                Text(_detalleFila(f),
-                                    style: AppTexto.metadato.copyWith(
-                                        color: AppColores.textoSecundario(
-                                            context))),
+                                Text(
+                                  'Elige el alcance: a quién se le '
+                                  'pausa el acceso.',
+                                  style: AppTexto.secundario.copyWith(
+                                      color: AppColores
+                                          .textoSecundario(context)),
+                                ),
                               ],
-                            ),
-                          ),
-                          SizedBox(
-                            width: 128,
-                            child: BotonSecundario(
-                              texto: 'Quitar',
-                              icono: Icons.lock_open_rounded,
-                              onPressed: () => _quitar(f),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                const EncabezadoSeccion(titulo: 'Aplicar un candado'),
-                Tarjeta(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
+                      const SizedBox(height: AppEspacio.lg),
                       SelectorIronForm<String>(
                         valorInicial: _alcance,
                         etiqueta: 'Alcance',
@@ -655,6 +757,24 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                         icono: Icons.lock_rounded,
                         cargando: _guardando,
                         onPressed: _guardando ? null : _crear,
+                      ),
+                      const SizedBox(height: AppEspacio.md),
+                      // 1.36 CAMPO C-1: la explicación de la
+                      // mecánica vive al pie del formulario
+                      // (era el párrafo suelto que abría la
+                      // pantalla): pausa sin cerrar sesiones,
+                      // retención en el servidor y salida
+                      // automática al quitar el candado.
+                      Text(
+                        'Pausa temporal del acceso sin cerrar '
+                        'sesiones. El candado llega a cada '
+                        'teléfono cuando sincroniza; el servidor '
+                        'además retiene las operaciones de quien '
+                        'esté pausado, y al quitar el candado '
+                        'salen solas.',
+                        style: AppTexto.metadato.copyWith(
+                            color: AppColores.textoSecundario(
+                                context)),
                       ),
                     ],
                   ),
