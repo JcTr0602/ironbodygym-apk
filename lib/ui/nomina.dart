@@ -911,9 +911,7 @@ class _NominaScreenState extends State<NominaScreen> {
         : [claveDestino];
     final destinoLiquidado =
         objetivosDestino.any((c) => _nominaLiquidadaMes[c] == true);
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: ListTile(
+    return Padding(padding: const EdgeInsets.only(bottom: AppEspacio.sm), child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
         leading: Icon(
           monto >= 0 ? Icons.add_circle_rounded : Icons.remove_circle_rounded,
           color: colorCifraNomina(monto),
@@ -945,8 +943,7 @@ class _NominaScreenState extends State<NominaScreen> {
               ? null
               : () => _eliminarBono('${b['id']}'),
         ),
-      ),
-    );
+      )));
   }
 
   Future<void> _guardarTarifa() async {

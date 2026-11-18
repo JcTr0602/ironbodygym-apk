@@ -171,30 +171,28 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   Widget _avisoLecturasFallidas() {
     // (1.36 H-B4 136-896) la misma severidad que Reparar da
     // a una lectura fallida: error, con reintento.
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(AppEspacio.md),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.error_outline_rounded,
-                color: AppColores.errorTexto(context)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'No se pudo leer el diario completo: lo que '
-                'falta puede existir. Las cifras de abajo '
-                'son parciales.',
-                style: AppTexto.cuerpo,
-              ),
+    // UI136-14: la tarjeta de la casa, no Card crudo.
+    return Tarjeta(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline_rounded,
+              color: AppColores.errorTexto(context)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No se pudo leer el diario completo: lo que '
+              'falta puede existir. Las cifras de abajo '
+              'son parciales.',
+              style: AppTexto.cuerpo,
             ),
-            TextButton(
-              onPressed: _cargar,
-              child: const Text('Reintentar'),
-            ),
-          ],
-        ),
+          ),
+          TextButton(
+            onPressed: _cargar,
+            child: const Text('Reintentar'),
+          ),
+        ],
       ),
     );
   }
@@ -432,9 +430,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
             SeveridadAvisoSync.media => AppColores.alerta,
             SeveridadAvisoSync.info => AppColores.info,
           };
-          return Card(
-            margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-            child: ListTile(
+          return Padding(padding: const EdgeInsets.only(bottom: AppEspacio.sm), child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
               leading: Icon(
                 a.severidad == SeveridadAvisoSync.info
                     ? Icons.info_rounded
@@ -451,8 +447,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
               onTap: _destinoReal(a.destino)
                   ? () => _abrirDestinoAviso(a)
                   : null,
-            ),
-          );
+            )));
         }),
       ],
     );
@@ -570,9 +565,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
               if (c.bajados > 0) '↓ ${c.bajados}',
               if (c.fotosSubidas > 0) 'fotos ${c.fotosSubidas}',
             ].join(' · ');
-            return Card(
-              margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-              child: ListTile(
+            return Padding(padding: const EdgeInsets.only(bottom: AppEspacio.sm), child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
                 leading: Icon(Icons.sync_rounded,
                     color: colorEstadoCorrida(c.estado, context)),
                 title: Text(
@@ -588,8 +581,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                 trailing:
                     const Icon(Icons.chevron_right_rounded),
                 onTap: () => _ir(DetalleCorridaSyncScreen(corrida: c)),
-              ),
-            );
+              )));
           }),
       ],
     );
@@ -844,10 +836,8 @@ class _DetalleCorridaSyncScreenState
                       if (t.fallidas > 0)
                         '${t.fallidas} fallidas',
                     ].join(' · ');
-                    return Card(
-                      margin: const EdgeInsets.only(
-                          bottom: AppEspacio.sm),
-                      child: ListTile(
+                    return Padding(padding: const EdgeInsets.only(
+                          bottom: AppEspacio.sm), child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
                         title: Text(
                             SyncEngine.nombreAmigableTabla(t.tabla)),
                         subtitle: Text(partes.isEmpty
@@ -865,8 +855,7 @@ class _DetalleCorridaSyncScreenState
                                           : EstadoCorrida.parcial,
                                   context)),
                         ),
-                      ),
-                    );
+                      )));
                   }),
                 ],
                 if (_ops.isNotEmpty) ...[
@@ -874,10 +863,8 @@ class _DetalleCorridaSyncScreenState
                   const Text('Operaciones subidas',
                       style: AppTexto.subtitulo),
                   const SizedBox(height: 8),
-                  ..._ops.map((op) => Card(
-                        margin: const EdgeInsets.only(
-                            bottom: AppEspacio.sm),
-                        child: ListTile(
+                  ..._ops.map((op) => Padding(padding: const EdgeInsets.only(
+                            bottom: AppEspacio.sm), child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
                           title: Text(op.resumen ?? op.tipo),
                           subtitle: op.motivo != null
                               ? Text(op.motivo!)
@@ -891,8 +878,7 @@ class _DetalleCorridaSyncScreenState
                                         ? AppColores.error
                                         : AppColores.alerta),
                           ),
-                        ),
-                      )),
+                        )))),
                 ],
                 if (_lecturasFallidas > 0)
                   Text(

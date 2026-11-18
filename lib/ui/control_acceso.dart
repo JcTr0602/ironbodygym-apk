@@ -117,8 +117,7 @@ class ControlAccesoScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                       AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-                  child: Card(
-                    child: ListTile(
+                  child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
                       leading: Icon(Icons.manage_accounts_rounded,
                           color: AppColores.textoSecundario(context)),
                       title: const Text('Usuarios APK'),
@@ -130,8 +129,7 @@ class ControlAccesoScreen extends StatelessWidget {
                           builder: (_) => const UsuariosScreen(),
                         ),
                       ),
-                    ),
-                  ),
+                    )),
                 ),
                 const Expanded(child: PanelPermisos(embebido: true)),
               ],
@@ -687,13 +685,12 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.sm),
-            child: Card(
-              color: AppColores.alerta.withValues(alpha: 0.12),
-              // 1.36 H-B3 (136-772): las acciones van DEBAJO
-              // del texto en un Wrap — como trailing de un
-              // ListTile desbordaban a 360 dp con texto
-              // grande.
-              child: Padding(
+            // 1.36 H-B3 (136-772): las acciones van DEBAJO
+            // del texto en un Wrap — como trailing de un
+            // ListTile desbordaban a 360 dp con texto
+            // grande · UI136-14: Tarjeta de la casa.
+            child: Tarjeta(
+                color: AppColores.alerta.withValues(alpha: 0.12),
                 padding: const EdgeInsets.all(AppEspacio.md),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -729,9 +726,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       ],
                     ),
                   ],
-                ),
-              ),
-            ),
+                ),),
           ),
         if (_vista == 'sinacceso' && selVisibles.isNotEmpty)
           SafeArea(
@@ -880,8 +875,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     final ultimo = a.ultimoAccesoEn == null
         ? 'Nunca ha entrado'
         : 'Entró ${tiempoRelativo(a.ultimoAccesoEn!.toIso8601String())}';
-    return Card(
-      child: ListTile(
+    return Tarjeta(padding: EdgeInsets.zero, child: ListTile(
         title: Row(
           children: [
             Flexible(
@@ -930,8 +924,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           ],
         ),
         onTap: () => _abrirFicha(a),
-      ),
-    );
+      ));
   }
 
   Future<void> _abrirFicha(AccesoCliente a) async {
@@ -1075,8 +1068,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         }
         final c = lista[i - (sellada ? 1 : 0)];
         final sel = _seleccion.contains(c.clienteId);
-        return Card(
-          child: ListTile(
+        return Tarjeta(padding: EdgeInsets.zero, child: ListTile(
             // (1.36 H-B4 136-884) la fila entera selecciona.
             onTap: () {
               setState(() {
@@ -1131,8 +1123,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               child: Text(
                   _generandoAcceso ? 'Generando…' : 'Generar PIN'),
             ),
-          ),
-        );
+          ));
       },
     );
   }

@@ -87,7 +87,9 @@ class _CapaCandadoState extends State<CapaCandado> {
                 decoration: BoxDecoration(
                   color: AppColores.carbon,
                   borderRadius: BorderRadius.circular(AppRadio.xl),
-                  border: Border.all(color: Colors.white12),
+                  border: Border.all(
+                      color: AppColores.textoSobreOscuro
+                          .withValues(alpha: 0.12)),
                   boxShadow: const [
                     BoxShadow(
                       color: Colors.black54,
@@ -112,7 +114,7 @@ class _CapaCandadoState extends State<CapaCandado> {
                       child: const Icon(
                         Icons.lock_rounded,
                         size: 38,
-                        color: Colors.white,
+                        color: AppColores.textoSobreOscuro,
                       ),
                     ),
                     const SizedBox(height: AppEspacio.lg),
@@ -120,7 +122,7 @@ class _CapaCandadoState extends State<CapaCandado> {
                       'Acceso pausado',
                       textAlign: TextAlign.center,
                       style: AppTexto.tituloPagina
-                          .copyWith(color: Colors.white),
+                          .copyWith(color: AppColores.textoSobreOscuro),
                     ),
                     const SizedBox(height: AppEspacio.sm),
                     Text(
@@ -129,13 +131,16 @@ class _CapaCandadoState extends State<CapaCandado> {
                       // 1.36 (136-306): el 16 era un escalón
                       // fantasma; el mensaje va en subtitulo.
                       style: AppTexto.subtitulo.copyWith(
-                        color: Colors.white,
+                        color: AppColores.textoSobreOscuro,
                         height: 1.45,
                       ),
                     ),
                     if (expiraHabana != null) ...[
                       const SizedBox(height: AppEspacio.lg),
-                      const Divider(color: Colors.white10, height: 1),
+                      Divider(
+                          color: AppColores.textoSobreOscuro
+                              .withValues(alpha: 0.10),
+                          height: 1),
                       const SizedBox(height: AppEspacio.md),
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -156,7 +161,7 @@ class _CapaCandadoState extends State<CapaCandado> {
                               '${expiraHabana.minute.toString().padLeft(2, '0')}.',
                               textAlign: TextAlign.center,
                               style: AppTexto.secundario
-                                  .copyWith(color: Colors.white70),
+                                  .copyWith(color: AppColores.textoSobreOscuroSuave),
                             ),
                           ),
                         ],
@@ -169,7 +174,7 @@ class _CapaCandadoState extends State<CapaCandado> {
                         // 1.36 H-B1 (136-448): el texto
                         // pequeño sobre oscuro sube un
                         // peldaño (white38 → white54).
-                        color: Colors.white54,
+                        color: AppColores.textoSobreOscuroMedio,
                         letterSpacing: 2.4,
                         fontWeight: FontWeight.w600,
                       ),

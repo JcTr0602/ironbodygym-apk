@@ -923,11 +923,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final hayDatos =
         _serie.any((d) => ((d['total'] as num?)?.toInt() ?? 0) > 0);
     if (!hayDatos) return const SizedBox.shrink();
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Column(
+    return Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 0), child: Tarjeta(padding: const EdgeInsets.fromLTRB(12, 8, 12, 12), child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -946,9 +942,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
             const SizedBox(height: 8),
             GraficoBarrasDiarias(datos: _serie, altura: 56),
           ],
-        ),
-      ),
-    );
+        ),));
   }
 
   Future<void> _marcarLeidas() async {

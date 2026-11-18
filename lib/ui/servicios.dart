@@ -2831,9 +2831,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         insignia = 'Registrada por el dueño a tu nombre';
       }
     }
-    final tarjeta = Card(
-      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: ListTile(
+    final tarjeta = Padding(padding: const EdgeInsets.only(bottom: AppEspacio.sm), child: Tarjeta(padding: EdgeInsets.zero, child: ListTile(
         onTap: () => _detalleVenta(v),
         leading: Icon(
           esReverso
@@ -2910,8 +2908,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
           ],
         ),
-      ),
-    );
+      )));
     // 1.36 H-B3 (136-724): fuera el Opacity 0.55 global —
     // el estado revertido lo dicen el chip y el tachado del
     // importe, con el contraste del resto intacto.

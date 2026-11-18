@@ -64,8 +64,11 @@ void main() {
       expect(s, contains('caducidadTxt'));
     });
     test('136-448 · blancos subidos en candado y vista previa', () {
+      // UI136-14: el white54 del candado se tokenizó a su
+      // peldaño exacto de la familia (0x8AFFFFFF) — la
+      // subida de 136-448 vive ahora con nombre.
       expect(_src('lib/ui/capa_candado.dart'),
-          contains('color: Colors.white54'));
+          contains('color: AppColores.textoSobreOscuroMedio'));
       final vp = _src('lib/ui/vista_previa_cliente.dart');
       expect('Colors.white54'.allMatches(vp).length,
           greaterThanOrEqualTo(2));
