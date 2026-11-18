@@ -384,6 +384,9 @@ class _FichaScreenState extends State<FichaScreen> {
   List<Map<String, dynamic>> _suplementos = [];
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
   List<Map<String, dynamic>> _incidencias = [];
+
+  /// 1.36 H-B1 (136-476): filas de incidencia expandidas.
+  final Set<int> _incidenciasExpandidas = {};
   File? _foto;
 
   /// Etapa 4 · F2: generación de la foto mostrada. La carga en
@@ -2252,24 +2255,37 @@ class _FichaScreenState extends State<FichaScreen> {
         insetPadding: const EdgeInsets.all(AppEspacio.lg),
         child: GestureDetector(
           onTap: () => Navigator.of(ctx).pop(),
-          child: widget.origenHero == null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadio.lg),
-                  child: Image.file(f, fit: BoxFit.contain),
-                )
-              // 1.36 FICHA (136-224): la foto grande nace
-              // de la credencial con su Hero (continuidad
-              // de crecimiento), no con un corte a diálogo.
-              : Hero(
-                  tag: tagHeroCliente(
-                      widget.origenHero!, widget.clienteId),
-                  flightShuttleBuilder: shuttleHeroCredencial,
-                  child: ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(AppRadio.lg),
-                    child: Image.file(f, fit: BoxFit.contain),
-                  ),
-                ),
+          // 1.36 H-B1 (136-471): si el archivo falla, se
+          // dice «Foto no disponible» (y el toque sigue
+          // cerrando), no un hueco roto en silencio.
+          child: Image.file(
+            f,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const Center(
+              child: Text('Foto no disponible',
+                  style: TextStyle(color: Colors.white)),
+            ),
+            frameBuilder: (_, hijo, __, ___) =>
+                widget.origenHero == null
+                    ? ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.lg),
+                        child: hijo,
+                      )
+                    // 1.36 FICHA (136-224): la foto grande
+                    // nace de la credencial con su Hero
+                    // (continuidad de crecimiento).
+                    : Hero(
+                        tag: tagHeroCliente(
+                            widget.origenHero!, widget.clienteId),
+                        flightShuttleBuilder: shuttleHeroCredencial,
+                        child: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.lg),
+                          child: hijo,
+                        ),
+                      ),
+          ),
         ),
       ),
     );
@@ -2841,7 +2857,8 @@ class _FichaScreenState extends State<FichaScreen> {
         clienteVencidoCobrable(
             esCasa: esCasa, pausado: pausado, dias: dias);
     final colorMarco = esCasa
-        ? AppColores.alerta
+        // 1.36 H-B1 (136-473): dorado propio de la Casa.
+        ? AppColores.casaMarco
         : pausado
             ? AppColores.info
             : dias == null
@@ -3299,7 +3316,13 @@ class _FichaScreenState extends State<FichaScreen> {
     Widget pestana(int i, String texto, String clave) {
       final activa = _pestanaFicha == i;
       return Expanded(
-        child: InkWell(
+        // 1.36 H-B1 (136-469): la pestaña se anuncia como
+        // pestaña, con su estado de selección.
+        child: Semantics(
+          button: true,
+          selected: activa,
+          label: texto,
+          child: InkWell(
           key: ValueKey(clave),
           onTap: () => _alCambiarPestanaFicha(i),
           child: AnimatedContainer(
@@ -3347,6 +3370,7 @@ class _FichaScreenState extends State<FichaScreen> {
                     : AppColores.textoSecundario(context),
               ),
             ),
+          ),
           ),
         ),
       );
@@ -4291,32 +4315,49 @@ class _FichaScreenState extends State<FichaScreen> {
                                   style: AppTexto.titulo),
                               const SizedBox(
                                   height: AppEspacio.sm),
-                              for (final i in _incidencias)
+                              for (var k = 0;
+                                  k < _incidencias.length;
+                                  k++)
                                 ListTile(
                                   dense: true,
                                   contentPadding:
                                       EdgeInsets.zero,
+                                  // 1.36 H-B1 (136-476): la
+                                  // fila se toca y EXPANDE —
+                                  // el texto completo se lee,
+                                  // no queda cortado a 2 líneas.
+                                  onTap: () => setState(() {
+                                    if (!_incidenciasExpandidas
+                                        .remove(k)) {
+                                      _incidenciasExpandidas.add(k);
+                                    }
+                                  }),
                                   leading: Icon(
-                                    i['visibilidad'] == 'privada'
+                                    _incidencias[k]['visibilidad'] == 'privada'
                                         ? Icons.lock_rounded
                                         : Icons.report_problem_rounded,
                                     size: 20,
                                     color: AppColores.textoSecundario(context),
                                   ),
                                   title: Text(
-                                      '${i['descripcion'] ?? ''}',
+                                      '${_incidencias[k]['descripcion'] ?? ''}',
                                       style:
                                           AppTexto.cuerpo,
-                                      maxLines: 2,
-                                      overflow:
-                                          TextOverflow.ellipsis),
+                                      maxLines: _incidenciasExpandidas
+                                              .contains(k)
+                                          ? null
+                                          : 2,
+                                      overflow: _incidenciasExpandidas
+                                              .contains(k)
+                                          ? TextOverflow.visible
+                                          : TextOverflow.ellipsis),
                                   subtitle: Text(
                                       // 1.25 T117 (F1-43): sin
                                       // trocear antes de fmtFecha
                                       // (que ya tolera cortos):
                                       // un creada_en raro lanzaba
                                       // RangeError en pleno build.
-                                      '${_estadoIncidencia(i['estado'])} · ${fmtFecha(i['creada_en'] as String?)}',
+                                      '${_estadoIncidencia(_incidencias[k]['estado'])} · ${fmtFecha(_incidencias[k]['creada_en'] as String?)}',
                                       style: AppTexto
                                           .secundario),
                                 ),
@@ -4545,13 +4586,17 @@ class _FichaScreenState extends State<FichaScreen> {
                                     'Otorgar, editar o revocar (con motivo e historial)',
                                     style: AppTexto.secundario),
                                 onTap: () async {
-                                  await mostrarModalTarifaEspecial(
+                                  // 1.36 H-B1 (136-479): la
+                                  // ficha solo recarga si el
+                                  // modal devolvió cambio.
+                                  final cambio =
+                                      await mostrarModalTarifaEspecial(
                                     context,
                                     clienteId: widget.clienteId,
                                     clienteNombre:
                                         '${_c?['nombre'] ?? ''}',
                                   );
-                                  _cargar();
+                                  if (cambio) _cargar();
                                 },
                               ),
                               ListTile(
@@ -4594,9 +4639,10 @@ class _FichaScreenState extends State<FichaScreen> {
                             ],
                           ),
                         ),
-                      if (AuthService().isOwner)
-                        const SizedBox(
-                            height: AppEspacio.md),
+                      // 1.36 H-B1 (136-478): UN solo
+                      // espaciado final, igual para todos
+                      // los roles (antes el dueño sumaba un
+                      // md extra sobre el lg común).
                       const SizedBox(
                           height: AppEspacio.lg),
     ];
@@ -5755,7 +5801,12 @@ class _DialogoElegirSuplementoState
             Expanded(
               child: filtrados.isEmpty
                   ? Center(
-                      child: Text('Sin resultados para «$q»',
+                      // 1.36 H-B1 (136-482): sin catálogo no
+                      // es «sin resultados» — se distingue.
+                      child: Text(
+                          widget.suplementos.isEmpty
+                              ? 'Sin suplementos disponibles'
+                              : 'Sin resultados para «$q»',
                           textAlign: TextAlign.center),
                     )
                   : ListView.builder(

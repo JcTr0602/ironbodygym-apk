@@ -581,6 +581,12 @@ class AppColores {
   static const casaIcono = Color(0xFFB8860B);
   static const casaTexto = Color(0xFF7A5A00);
 
+  /// 1.36 H-B1 (136-473): el MARCO de la Casa en la ficha —
+  /// token dorado propio, distinto del alerta de
+  /// por-vencer (antes ambos eran AppColores.alerta y una
+  /// Casa se leía como un aviso).
+  static const casaMarco = Color(0xFFB8860B);
+
   /// Dorado de la pastilla y la línea Plus de Invitados.
   static const doradoPlus = Color(0xFF9A7B0A);
 

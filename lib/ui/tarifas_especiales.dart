@@ -282,19 +282,19 @@ class _TarifasScreenState extends State<TarifasScreen> {
 ///   fila activa del periodo elegido (ambos métodos).
 /// - Sin [clienteId]: modo multi (desde TarifasScreen). Primero se
 ///   eligen los clientes; al guardar, una fila por cliente.
-Future<void> mostrarModalTarifaEspecial(
+/// 136-479: devuelve si hubo cambio (guardar/revocar).
+Future<bool> mostrarModalTarifaEspecial(
   BuildContext context, {
   int? clienteId,
   String? clienteNombre,
 }) async {
-  if (!AuthService().isOwner) return;
+  if (!AuthService().isOwner) return false;
   if (clienteId == null) {
     final ids = await _elegirClientes(context);
-    if (ids == null || ids.isEmpty || !context.mounted) return;
-    await _formularioTarifa(context, clienteIds: ids);
-    return;
+    if (ids == null || ids.isEmpty || !context.mounted) return false;
+    return _formularioTarifa(context, clienteIds: ids);
   }
-  await _formularioTarifa(context,
+  return _formularioTarifa(context,
       clienteIds: [clienteId], clienteNombre: clienteNombre);
 }
 
@@ -395,6 +395,9 @@ class _DialogoElegirClientesTarifaState
 }
 
 /// Datos que devuelve el formulario de tarifa al guardar.
+/// 1.36 H-B1 (136-479): [revocada] marca la salida por
+/// revocación — también es un cambio, y el llamador debe
+/// recargar solo si hubo cambio de verdad.
 typedef _DatosTarifa = ({
   String nombre,
   String efectivo,
@@ -403,9 +406,11 @@ typedef _DatosTarifa = ({
   String hasta,
   String motivo,
   String periodo,
+  bool revocada,
 });
 
-Future<void> _formularioTarifa(
+/// Devuelve true si la tarifa CAMBIÓ (guardada o revocada).
+Future<bool> _formularioTarifa(
   BuildContext context, {
   required List<int> clienteIds,
   String? clienteNombre,
@@ -419,7 +424,7 @@ Future<void> _formularioTarifa(
     activaPrevia =
         await tarifaActivaPara(clienteIds.first, 'mensual');
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return false;
 
   final datos = await showDialog<_DatosTarifa>(
     context: context,
@@ -429,7 +434,10 @@ Future<void> _formularioTarifa(
       previaInicial: activaPrevia,
     ),
   );
-  if (datos == null || !context.mounted) return;
+  if (datos == null || !context.mounted) return false;
+  // 136-479: revocar ya cambió la tarifa dentro del
+  // diálogo; no hay nada que otorgar.
+  if (datos.revocada) return true;
   final periodo = datos.periodo;
 
   // Validación de respaldo (SL-9 G09-1: la validación VIVE en
@@ -447,9 +455,9 @@ Future<void> _formularioTarifa(
     motivo: datos.motivo,
   );
   if (error != null) {
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
     mostrarSnack(context, error, significado: SignificadoChip.error);
-    return;
+    return false;
   }
 
   // Multi: si algún método pasaría de tener valor a null para algún
@@ -483,7 +491,7 @@ Future<void> _formularioTarifa(
           ],
         ),
       );
-      if (conf != true) return;
+      if (conf != true) return false;
     }
   }
 
@@ -501,8 +509,9 @@ Future<void> _formularioTarifa(
   );
   // Como tras revocar: subir en cuanto se guarda.
   SyncEngine.instance.push();
-  if (!context.mounted) return;
+  if (!context.mounted) return true;
   mostrarSnack(context, 'Tarifa especial guardada', significado: SignificadoChip.exito);
+  return true;
 }
 
 /// SL-9 (G09-1): validación del formulario de tarifa especial,
@@ -799,9 +808,22 @@ class _DialogoFormularioTarifaState
                 // (antes la ventana en que el espejo viejo
                 // volvía a mostrarla activa duraba un turno).
                 SyncEngine.instance.push();
-                // Cerrar SIN guardar: null hace que el código de
-                // arriba retorne sin otorgar nada nuevo.
-                if (context.mounted) Navigator.pop(context);
+                // Cerrar SIN guardar: el registro sale con
+                // revocada=true (136-479) — el código de
+                // arriba lo lee como «hubo cambio» y no
+                // otorga nada nuevo.
+                if (context.mounted) {
+                  Navigator.pop(context, (
+                    nombre: '',
+                    efectivo: '',
+                    transfer: '',
+                    desde: '',
+                    hasta: '',
+                    motivo: '',
+                    periodo: 'mensual',
+                    revocada: true,
+                  ));
+                }
               },
               child: const Text('Revocar',
                   style: TextStyle(color: AppColores.error))),
@@ -822,6 +844,7 @@ class _DialogoFormularioTarifaState
                 hasta: _hasta == null ? '' : _isoFechaTarifa(_hasta!),
                 motivo: _motivoCtrl.text,
                 periodo: _periodo,
+                revocada: false,
               );
               final error = errorValidacionTarifaEspecial(
                 nombre: datos.nombre,

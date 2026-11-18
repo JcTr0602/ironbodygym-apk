@@ -11,6 +11,8 @@
 // await se comprueba `mounted` antes de abrir diálogos o el modal del
 // PIN. Sin esto, la RPC cambiaría el PIN en el servidor pero el modal
 // con el PIN nuevo nunca se abriría (contexto desmontado).
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -86,9 +88,33 @@ bool _soloDueno(BuildContext ctx) {
   return false;
 }
 
+/// 1.36 H-B1 (136-451): el error crudo («Error: $e») no le
+/// dice nada al dueño — se mapea a su causa en sencillo:
+/// tiempo agotado, red o el mensaje del servidor.
+String mensajeErrorAcceso(Object e) {
+  if (e is TimeoutException) {
+    return 'Se acabó el tiempo de espera. Revisa tu conexión '
+        'e inténtalo de nuevo.';
+  }
+  if (e is PostgrestException) {
+    final m = e.message.trim();
+    if (m.isNotEmpty) return m;
+  }
+  final s = '$e'.toLowerCase();
+  if (s.contains('socket') ||
+      s.contains('network') ||
+      s.contains('failed host lookup') ||
+      s.contains('connection') ||
+      s.contains('timeout')) {
+    return 'Sin conexión: no se pudo completar la acción.';
+  }
+  return 'No se pudo completar la acción. Inténtalo de nuevo.';
+}
+
 void _snackError(BuildContext ctx, Object e) {
   if (!ctx.mounted) return;
-  mostrarSnack(ctx, 'Error: $e', significado: SignificadoChip.error);
+  mostrarSnack(ctx, mensajeErrorAcceso(e),
+      significado: SignificadoChip.error);
 }
 
 /// Confirmación estándar de las acciones de acceso (extraída de la
@@ -136,6 +162,9 @@ Future<void> accionSimpleAcceso(
   bool confirmarAntes = false,
   String titulo = '',
   String texto = '',
+  // 1.36 H-B1 (136-452): el peligro de la acción llega
+  // hasta su confirmación (botón en rojo).
+  bool peligro = false,
 }) =>
     // 1.28 (M4-A5): guarda compartida anti-doble-acción.
     _conGuardaAcceso(
@@ -150,6 +179,7 @@ Future<void> accionSimpleAcceso(
         confirmarAntes: confirmarAntes,
         titulo: titulo,
         texto: texto,
+        peligro: peligro,
       ),
     );
 
@@ -162,11 +192,12 @@ Future<void> _accionSimpleAccesoInterna(
   bool confirmarAntes = false,
   String titulo = '',
   String texto = '',
+  bool peligro = false,
 }) async {
   if (!_soloDueno(ctx)) return;
   if (confirmarAntes) {
     if (!await confirmarAccionAcceso(ctx, titulo, texto,
-        boton: 'Sí, continuar')) {
+        boton: 'Sí, continuar', peligro: peligro)) {
       return;
     }
     // Guarda de ciclo de vida (panel R2): si el anfitrión se desmontó
@@ -446,6 +477,16 @@ Future<void> abrirMenuAccesoDesdeLista(
     if (!ctx.mounted) return;
   }
   final a = AccesoAppCache.instance.obtener(clienteId);
+  // 1.36 H-B1 (136-449): con la foto PERSISTIDA (guardada,
+  // sin verificar en esta sesión) no se ofrecen acciones
+  // de acceso sobre datos sin confirmar — se avisa «sin
+  // conexión» y la vía es la ficha, como en la rama sin
+  // dato de abajo.
+  if (a != null && AccesoAppCache.instance.esPersistido) {
+    _snack(ctx,
+        'Sin conexión: el acceso guardado no está verificado; abre su ficha.');
+    return;
+  }
   if (a != null) {
     await mostrarMenuAccionesAcceso(
       ctx,
@@ -612,6 +653,9 @@ Future<void> mostrarMenuAccionesAcceso(
                 texto:
                     'El cliente ya no podrá entrar a la app. Puedes reactivarlo cuando quieras.',
                 alTerminar: alTerminar,
+                // 136-452: el peligro también va DENTRO de
+                // la acción, no solo en la fila del menú.
+                peligro: true,
               ),
               peligro: true,
             ),

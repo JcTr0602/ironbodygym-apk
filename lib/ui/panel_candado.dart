@@ -379,10 +379,33 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
         }
       }
     }
+    // 1.36 H-B1 (136-455): la confirmación RESUME lo que se
+    // va a aplicar — objetivo, app, caducidad y mensaje —
+    // no una frase genérica sobre «el alcance elegido».
+    final appEfectiva = _alcance == 'global'
+        ? 'ambas'
+        : (appForzadaCandado(
+                alcance: _alcance,
+                rol: _rol,
+                personaTipo: _personaTipo) ??
+            _app);
+    final objetivoTxt = switch (_alcance) {
+      'global' => 'todas las cuentas',
+      'rol' => 'el rol $_rol',
+      _ => _personaElegida?.nombre ?? 'la persona $objetivo',
+    };
+    final caducidadTxt = _horasCaducidad > 0
+        ? 'Caduca en $_horasCaducidad h.'
+        : 'Sin caducidad: dura hasta que lo quites.';
+    final mensajePrevio = _mensajeCtrl.text.trim();
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Aplicar candado',
-      mensaje: 'Se pausará el acceso según el alcance elegido. '
+      mensaje: 'Objetivo: $objetivoTxt.\n'
+          'App: $appEfectiva.\n'
+          '$caducidadTxt\n'
+          '${mensajePrevio.isNotEmpty ? 'Mensaje: «$mensajePrevio».\n' : 'Sin mensaje para el usuario.\n'}'
+          '\nSe pausará el acceso según ese resumen. '
           'Nadie pierde su sesión ni su trabajo pendiente: al '
           'quitar el candado, todo continúa.',
       aceptar: 'Aplicar',

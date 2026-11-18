@@ -146,7 +146,10 @@ class _CapaCandadoState extends State<CapaCandado> {
                     Text(
                       'IRON BODY GYM',
                       style: AppTexto.minuscula.copyWith(
-                        color: Colors.white38,
+                        // 1.36 H-B1 (136-448): el texto
+                        // pequeño sobre oscuro sube un
+                        // peldaño (white38 → white54).
+                        color: Colors.white54,
                         letterSpacing: 2.4,
                         fontWeight: FontWeight.w600,
                       ),

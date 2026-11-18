@@ -618,7 +618,8 @@ class _VistaPreviaClienteScreenState
               'Nota: en la app del cliente el aviso de vencimiento '
               'sale a los 5 días; en Gestión, a los 7.',
               style:
-                  AppTexto.metadato.copyWith(color: Colors.white38)),
+                  // 1.36 H-B1 (136-448): white38 → white54.
+                  AppTexto.metadato.copyWith(color: Colors.white54)),
         ),
         // Entrenador de turno: abierto por horario ≠ entrenador asignado.
         _tarjeta([
@@ -1181,7 +1182,8 @@ class _VistaPreviaClienteScreenState
           const SizedBox(height: 2),
           Text(subtitulo,
               style:
-                  AppTexto.metadato.copyWith(color: Colors.white38),
+                  // 1.36 H-B1 (136-448): white38 → white54.
+                  AppTexto.metadato.copyWith(color: Colors.white54),
               textAlign: TextAlign.center),
         ],
       ),

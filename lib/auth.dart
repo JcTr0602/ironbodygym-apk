@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'acceso_app_cache.dart';
+import 'app_log.dart';
 import 'config.dart';
 import 'localdb.dart';
 
@@ -254,8 +255,9 @@ class AuthService {
   static const metaMotivoSesionMuerta = 'motivo_sesion_muerta';
 
   /// Texto del motivo (mismo que usa el motor de sync).
-  static const textoSesionMuerta =
-      'La sesión no es válida: cierra sesión y entra de nuevo.';
+  /// 1.36 H-B1 (136-460): no se pide cerrar lo que ya está
+  /// cerrado — la sesión venció y toca entrar de nuevo.
+  static const textoSesionMuerta = 'Tu sesión venció: entra de nuevo.';
 
   /// 1.32 (O2F2S, Pieza 4d en su forma ADJUDICADA por Argón,
   /// F-5): ¿este error de refresco es un RECHAZO de auth del
@@ -836,7 +838,14 @@ class AuthService {
     // viejos en memoria para la siguiente sesión.
     AccesoAppCache.instance.limpiar();
     // v1.3.1 (M3): purgar datos sensibles antes de cerrar sesión.
-    await LocalDb.purgaAlCerrarSesion();
+    // 1.36 H-B1 (136-458): si la purga falla, el cierre de
+    // sesión se ejecuta IGUAL — el fallo queda registrado,
+    // nunca bloquea la salida.
+    try {
+      await LocalDb.purgaAlCerrarSesion();
+    } catch (e) {
+      AppLog.error('auth', 'purga_cierre_sesion_fallo', d: '$e');
+    }
     await _c.auth.signOut();
   }
 }
