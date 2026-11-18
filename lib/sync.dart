@@ -291,9 +291,22 @@ class SyncStatus {
   final String? avisoSyncCorto;
   final DateTime? avisoSyncTs;
 
+  /// 1.36 (136-142, E-01/C-3): trabajo vivo FUERA de la cola
+  /// de subida al calcular esta foto (ops en revisión o
+  /// rechazadas sin reconocer, fotos pendientes/en error,
+  /// comprobantes sin subir/en error, incidencias en error —
+  /// ver LocalDb.conteoTrabajoFueraCola). `pending` no lo
+  /// incluye: una foto con pending == 0 y fueraCola > 0 NO
+  /// está «al día». [fueraColaSinLeer]: el conteo falló — la
+  /// foto no afirma «al día» tampoco (sin verificar).
+  final int fueraCola;
+  final bool fueraColaSinLeer;
+
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
+      this.fueraCola = 0,
+      this.fueraColaSinLeer = false,
       this.lastOk,
       this.lastError,
       this.progreso,
@@ -637,6 +650,15 @@ class SyncResultado {
   /// cuando esa persona inicie sesión.
   final int deOtroUsuario;
 
+  /// 1.36 (136-142, E-01): trabajo vivo FUERA de `ops_queue`
+  /// al cierre (ops en revisión/rechazadas sin reconocer,
+  /// fotos pendientes/en error, comprobantes sin subir/en
+  /// error, incidencias en error —
+  /// LocalDb.conteoTrabajoFueraCola). Con esta cifra > 0 el
+  /// resultado NO está «al día» aunque la cola de subida
+  /// haya quedado vacía.
+  final int trabajoFueraCola;
+
   /// Yunque B (YB-TRA-01): el conteo de pendientes al cierre
   /// FALLÓ (p. ej. la BD ocupada). Los conteos valen 0 pero no
   /// significan «cola vacía»: jamás «al día», jamás cancelar
@@ -665,6 +687,7 @@ class SyncResultado {
     this.porSubir = 0,
     this.conError = 0,
     this.deOtroUsuario = 0,
+    this.trabajoFueraCola = 0,
     this.conteoIndeterminado = false,
     this.cortadoPorLock = false,
   });
@@ -682,6 +705,7 @@ class SyncResultado {
         porSubir = 0,
         conError = 0,
         deOtroUsuario = 0,
+        trabajoFueraCola = 0,
         conteoIndeterminado = false,
         cortadoPorLock = false;
 
@@ -696,7 +720,9 @@ class SyncResultado {
       // la bajada a mitad; el resumen lo dice «interrumpida».
       !cortadoPorLock &&
       !conteoIndeterminado &&
-      pendientesRestantes == 0;
+      pendientesRestantes == 0 &&
+      // 1.36 (136-142): tampoco con trabajo fuera de la cola.
+      trabajoFueraCola == 0;
 
   /// Resumen corto y VERAZ de la corrida. El «Todo estaba al día»
   /// solo aparece cuando [alDia] y no se movió nada.
@@ -717,6 +743,11 @@ class SyncResultado {
       return 'Sincronización parcial: quedan $pendientesRestantes '
           'operación${pendientesRestantes == 1 ? '' : 'es'} por sincronizar';
     }
+    if (trabajoFueraCola > 0) {
+      return 'Sincronización parcial: quedan $trabajoFueraCola '
+          'elemento${trabajoFueraCola == 1 ? '' : 's'} por atender '
+          'fuera de la cola';
+    }
     if (subidos == 0 && bajados == 0) return 'Todo estaba al día';
     return 'Sincronización completada';
   }
@@ -730,7 +761,13 @@ class SyncResultado {
       return 'No se pudo verificar la cola de pendientes: '
           'se reintentará en la próxima sincronización.';
     }
-    if (pendientesRestantes <= 0) return '';
+    if (pendientesRestantes <= 0 && trabajoFueraCola <= 0) return '';
+    if (pendientesRestantes <= 0) {
+      return 'Quedan $trabajoFueraCola elemento'
+          '${trabajoFueraCola == 1 ? '' : 's'} por atender fuera de '
+          'la cola de subida (operaciones en revisión o rechazadas, '
+          'fotos, comprobantes o incidencias con problema).';
+    }
     final lineas = <String>[
       'Quedan $pendientesRestantes operación'
           '${pendientesRestantes == 1 ? '' : 'es'} sin sincronizar:',
@@ -749,6 +786,11 @@ class SyncResultado {
     if (deOtroUsuario > 0) {
       lineas.add('• $deOtroUsuario de otro usuario en este '
           'teléfono: se suben cuando esa persona inicie sesión.');
+    }
+    if (trabajoFueraCola > 0) {
+      lineas.add('• $trabajoFueraCola fuera de la cola por '
+          'atender (en revisión o rechazadas, fotos, '
+          'comprobantes o incidencias con problema).');
     }
     return lineas.join('\n');
   }
@@ -1986,6 +2028,17 @@ class SyncEngine {
       String? resumen,
       required int seqEmision}) async {
     final pending = await _db.countPendingOps();
+    // 1.36 (136-142): la foto cuenta TAMBIÉN el trabajo
+    // fuera de la cola de subida; si el conteo falla, la
+    // foto queda «sin leer» en esa pieza (jamás un 0 fingido
+    // que componga un «al día»).
+    var fueraColaObs = 0;
+    var fueraColaSinLeerObs = false;
+    try {
+      fueraColaObs = (await _db.conteoTrabajoFueraCola()).total;
+    } catch (_) {
+      fueraColaSinLeerObs = true;
+    }
     final lastOk = await _ultimaOk();
     // v1.0.15: detectar si el servidor tiene cambios sin bajar.
     // SYNC-12 (1.35): si la lectura falla, la novedad queda
@@ -2077,6 +2130,8 @@ class SyncEngine {
     return SyncStatus(
         phase: phase,
         pending: pending,
+        fueraCola: fueraColaObs,
+        fueraColaSinLeer: fueraColaSinLeerObs,
         lastOk: lastOk,
         lastError: error,
         progreso: progreso,
@@ -3436,6 +3491,7 @@ class SyncEngine {
     // de la UI se construye con esto y jamás dirá «al día» si
     // queda algo por sincronizar.
     final conteo = await _conteoPendientesSeguro();
+    final fueraCola = await _conteoFueraColaSeguro();
     return SyncResultado(
       corrio: true,
       subidos: subidos,
@@ -3447,7 +3503,9 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
-      conteoIndeterminado: conteo.indeterminado,
+      trabajoFueraCola: fueraCola.total,
+      conteoIndeterminado:
+          conteo.indeterminado || fueraCola.indeterminado,
       cortadoPorLock: cortadoPorLock,
     );
   }
@@ -3531,6 +3589,22 @@ class SyncEngine {
         deOtroUsuario: 0,
         indeterminado: true,
       );
+    }
+  }
+
+  /// 1.36 (136-142): el conteo de trabajo fuera de la cola
+  /// para el [SyncResultado], con la misma disciplina que
+  /// [_conteoPendientesSeguro]: si la lectura falla, el
+  /// resultado sale con conteoIndeterminado — jamás un
+  /// «al día» sobre un cero fingido.
+  Future<({int total, bool indeterminado})>
+      _conteoFueraColaSeguro() async {
+    try {
+      final c = await _db.conteoTrabajoFueraCola();
+      return (total: c.total, indeterminado: false);
+    } catch (e) {
+      AppLog.error('sync', 'conteo_fuera_cola_fallo', d: '$e');
+      return (total: 0, indeterminado: true);
     }
   }
 
@@ -4029,6 +4103,7 @@ class SyncEngine {
     // Con esperarIncidencias ya corrieron dentro: no relanzar.
     if (!esperarIncidencias) _lanzarFotosIncidencias();
     final conteo = await _conteoPendientesSeguro();
+    final fueraColaPush = await _conteoFueraColaSeguro();
     final resultado = SyncResultado(
       corrio: true,
       subidos: subidos,
@@ -4038,7 +4113,9 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
-      conteoIndeterminado: conteo.indeterminado,
+      trabajoFueraCola: fueraColaPush.total,
+      conteoIndeterminado:
+          conteo.indeterminado || fueraColaPush.indeterminado,
       cortadoPorLock: cortadoPorLock,
     );
     // Sello de Argón (fusión 1+4): un push que deja la cola
@@ -4426,6 +4503,7 @@ class SyncEngine {
         disparadorCorrida: 'ciclo');
     if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
     final conteo = await _conteoPendientesSeguro();
+    final fueraColaPull = await _conteoFueraColaSeguro();
     return SyncResultado(
       corrio: true,
       bajados: bajados,
@@ -4435,7 +4513,9 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
-      conteoIndeterminado: conteo.indeterminado,
+      trabajoFueraCola: fueraColaPull.total,
+      conteoIndeterminado:
+          conteo.indeterminado || fueraColaPull.indeterminado,
       cortadoPorLock: cortadoPorLock,
     );
   }
