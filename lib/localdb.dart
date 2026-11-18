@@ -11768,12 +11768,207 @@ class LocalDb {
   /// 1.29 (Oleada 6, D-16): ops que FALLARON al subir o
   /// esperan decisión (error, rechazada, necesita_revision)
   /// — el «falló» del aviso de estado de la Salud del sync.
+  ///
+  /// 1.36 (136-142, E-01/C-3): las rechazadas ya RECONOCIDAS
+  /// ([marcarOpRechazadaReconocida]) no cuentan: su rechazo
+  /// quedó explicado y archivado por el dueño; contarlas
+  /// mantenía el aviso en rojo para siempre (caso de campo:
+  /// dos `liquidar_caja` rechazadas con motivo correcto).
   Future<int> countOpsFallidas() async {
     final d = await db;
     final r = await d.rawQuery(
         'SELECT COUNT(*) c FROM ops_queue WHERE estado IN '
-        "('error', 'rechazada', 'necesita_revision')");
-    return Sqflite.firstIntValue(r) ?? 0;
+        "('error', 'necesita_revision')");
+    var n = Sqflite.firstIntValue(r) ?? 0;
+    n += (await opsRechazadasSinReconocer()).length;
+    return n;
+  }
+
+  // ------------------------------------------------------------------
+  // 1.36 (136-142, E-01 + caso de campo C-3): trabajo FUERA de la
+  // cola de subida y reconocimiento de rechazos explicados.
+  //
+  // countPendingOps solo ve pendiente/enviada/error: una op en
+  // revisión o rechazada, una foto pendiente/en error, un
+  // comprobante sin subir o una incidencia en error NO suben el
+  // contador y las superficies decían «al día» con ese trabajo
+  // vivo. [conteoTrabajoFueraCola] es el conteo ÚNICO de ese
+  // trabajo; lo consumen la foto del motor, SyncResultado, Salud
+  // y el héroe de la Cola.
+  // ------------------------------------------------------------------
+
+  /// Meta con los op_uuid de las ops rechazadas ya reconocidas
+  /// (JSON: lista de textos). Sin migración: la tabla `meta`
+  /// es el mecanismo local existente para marcas de este tipo.
+  static const String metaOpsRechazadasReconocidas =
+      'ops_rechazadas_reconocidas_v1';
+
+  /// El motivo del servidor que una op YA guarda: el `error`
+  /// de su `resultado_servidor` (JSON del push) o, en su
+  /// defecto, la columna `error`. null si no guarda ninguno:
+  /// sin motivo la op NO es un «rechazo explicado».
+  /// FUNCIÓN PURA.
+  static String? motivoServidorDeOp(Map<String, dynamic> op) {
+    final crudo = op['resultado_servidor'];
+    if (crudo is String && crudo.isNotEmpty) {
+      try {
+        final r = jsonDecode(crudo);
+        if (r is Map) {
+          final m = '${r['error'] ?? ''}'.trim();
+          if (m.isNotEmpty) return m;
+        }
+      } catch (_) {}
+    } else if (crudo is Map) {
+      final m = '${crudo['error'] ?? ''}'.trim();
+      if (m.isNotEmpty) return m;
+    }
+    final e = '${op['error'] ?? ''}'.trim();
+    return e.isEmpty ? null : e;
+  }
+
+  /// Los op_uuid reconocidos hasta hoy (conjunto vacío si la
+  /// meta no existe o está dañada: ante la duda, nada se da
+  /// por reconocido y todo sigue contando).
+  Future<Set<String>> opsRechazadasReconocidas(
+      {DatabaseExecutor? txn}) async {
+    try {
+      final v = await getMeta(metaOpsRechazadasReconocidas, txn: txn);
+      if (v == null || v.isEmpty) return {};
+      final l = jsonDecode(v);
+      if (l is List) {
+        return {for (final e in l) if (e is String && e.isNotEmpty) e};
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// Las filas 'rechazada' que aún cuentan: todas menos las
+  /// reconocidas. Devuelve op_uuid y tipo (lo que el conteo y
+  /// la Salud necesitan, sin payloads).
+  Future<List<Map<String, dynamic>>> opsRechazadasSinReconocer() async {
+    final d = await db;
+    final reconocidas = await opsRechazadasReconocidas();
+    final filas = await d.query('ops_queue',
+        columns: ['op_uuid', 'tipo'],
+        where: "estado = 'rechazada'");
+    return [
+      for (final f in filas)
+        if (!reconocidas.contains('${f['op_uuid']}')) f,
+    ];
+  }
+
+  /// Reconoce/descarta LOCALMENTE una op rechazada CON motivo
+  /// del servidor (el gesto del caso de campo C-3). Es un acto
+  /// local sobre una op ya terminal: la op NO cambia de
+  /// estado, NO se borra, NO se reencola — solo gana la marca
+  /// de reconocida (meta) y su asiento en la bitácora (tabla
+  /// `app_log`, la estructura de registro existente; no se
+  /// llama a AppLog desde aquí porque app_log.dart importa
+  /// este archivo y el ciclo está documentado en este mismo
+  /// archivo). Marca y asiento van en UNA transacción.
+  ///
+  /// Devuelve false sin tocar nada si la op no existe, no
+  /// está en 'rechazada' (una en 'necesita_revision' espera
+  /// decisión real: NO se descarta con este gesto) o no trae
+  /// motivo del servidor (no es un rechazo explicado).
+  Future<bool> marcarOpRechazadaReconocida(String opUuid) async {
+    final d = await db;
+    return d.transaction((txn) async {
+      final rows = await txn.query('ops_queue',
+          where: 'op_uuid=?', whereArgs: [opUuid], limit: 1);
+      if (rows.isEmpty) return false;
+      final op = rows.first;
+      if ('${op['estado']}' != 'rechazada') return false;
+      final motivo = motivoServidorDeOp(op);
+      if (motivo == null) return false;
+      final reconocidas =
+          await opsRechazadasReconocidas(txn: txn);
+      if (reconocidas.contains(opUuid)) return true;
+      reconocidas.add(opUuid);
+      await setMetaEn(
+          txn, metaOpsRechazadasReconocidas, jsonEncode(reconocidas.toList()));
+      final ahora = isoHabana(ahoraHabana());
+      await txn.insert('app_log', {
+        'ts': ahora,
+        'modulo': 'sync',
+        'evento': 'op_rechazada_reconocida',
+        'detalle': 'tipo=${op['tipo']} motivo=$motivo '
+            'reconocida_en=$ahora',
+        'nivel': 'info',
+        'op_id': opUuid,
+        'primer_ts': ahora,
+      });
+      return true;
+    });
+  }
+
+  /// El trabajo vivo FUERA de la cola de subida, por piezas:
+  /// - [enRevision]: ops 'necesita_revision' (esperan decisión
+  ///   real; nunca salen de la cuenta por reconocimiento).
+  /// - [rechazadasSinReconocer]: ops 'rechazadas' aún no
+  ///   reconocidas con el gesto de arriba.
+  /// - [fotosPendientes]/[fotosError]: fotos_cola en
+  ///   'pendiente'/'error'.
+  /// - [comprobantesPendientes]/[comprobantesError]:
+  ///   comprobantes_pago en 'pendiente'/'error'.
+  /// - [incidenciasEnError]: fotos de incidencias en
+  ///   sync_estado 'error' + incidencias locales en
+  ///   sync_estado 'error'.
+  /// Lanza si alguna lectura falla: el llamador decide si lo
+  /// trata como «sin verificar» (nunca como cero fingido).
+  Future<
+      ({
+        int enRevision,
+        int rechazadasSinReconocer,
+        int fotosPendientes,
+        int fotosError,
+        int comprobantesPendientes,
+        int comprobantesError,
+        int incidenciasEnError,
+        int total
+      })> conteoTrabajoFueraCola() async {
+    final d = await db;
+    Future<int> contar(String sql, [List<Object?>? args]) async {
+      final r = await d.rawQuery(sql, args);
+      return Sqflite.firstIntValue(r) ?? 0;
+    }
+
+    final enRevision = await contar(
+        "SELECT COUNT(*) c FROM ops_queue "
+        "WHERE estado = 'necesita_revision'");
+    final rechazadas = (await opsRechazadasSinReconocer()).length;
+    final fotosPendientes = await contar(
+        "SELECT COUNT(*) c FROM fotos_cola WHERE estado = 'pendiente'");
+    final fotosError = await contar(
+        "SELECT COUNT(*) c FROM fotos_cola WHERE estado = 'error'");
+    final comprobantesPendientes = await contar(
+        "SELECT COUNT(*) c FROM comprobantes_pago "
+        "WHERE estado = 'pendiente'");
+    final comprobantesError = await contar(
+        "SELECT COUNT(*) c FROM comprobantes_pago "
+        "WHERE estado = 'error'");
+    final incidenciasEnError = await contar(
+            "SELECT COUNT(*) c FROM incidencias_fotos "
+            "WHERE sync_estado = 'error'") +
+        await contar(
+            "SELECT COUNT(*) c FROM incidencias_local "
+            "WHERE sync_estado = 'error'");
+    return (
+      enRevision: enRevision,
+      rechazadasSinReconocer: rechazadas,
+      fotosPendientes: fotosPendientes,
+      fotosError: fotosError,
+      comprobantesPendientes: comprobantesPendientes,
+      comprobantesError: comprobantesError,
+      incidenciasEnError: incidenciasEnError,
+      total: enRevision +
+          rechazadas +
+          fotosPendientes +
+          fotosError +
+          comprobantesPendientes +
+          comprobantesError +
+          incidenciasEnError,
+    );
   }
 
   /// 1.23 (W1): filas crudas de una tabla espejo. El nombre es
@@ -11817,7 +12012,8 @@ class LocalDb {
   ///
   /// - [error]: filas en 'error' + 'rechazada' +
   ///   'necesita_revision' — exactamente el conjunto que el
-  ///   héroe sumaba (lista en error/rechazada ∪ bloqueadas).
+  ///   héroe sumaba (lista en error/rechazada ∪ bloqueadas),
+  ///   MENOS las rechazadas ya reconocidas (1.36, 136-142).
   ///   Los estados son excluyentes por fila, así que la suma
   ///   equivale a la antigua deduplicación por op_uuid.
   /// - [enviada]: filas en 'enviada' (el «en limbo»).
@@ -11833,11 +12029,15 @@ class LocalDb {
     bool Function(Map<String, dynamic> op)? esMia,
   }) async {
     final d = await db;
+    // 1.36 (136-142, C-3): las rechazadas ya RECONOCIDAS no
+    // cuentan en el héroe — su rechazo quedó explicado y
+    // archivado; contarlas dejaba el héroe en rojo para
+    // siempre con trabajo que ya no espera a nadie.
+    final reconocidas = await opsRechazadasReconocidas();
     if (esMia == null) {
       final filas = await d.rawQuery(
           'SELECT estado, COUNT(*) c FROM ops_queue '
-          "WHERE estado IN ('error', 'rechazada', "
-          "'necesita_revision', 'enviada') "
+          "WHERE estado IN ('error', 'necesita_revision', 'enviada') "
           'GROUP BY estado');
       var error = 0;
       var enviada = 0;
@@ -11849,6 +12049,7 @@ class LocalDb {
           error += c;
         }
       }
+      error += (await opsRechazadasSinReconocer()).length;
       return (error: error, enviada: enviada);
     }
     final filas = await d.query('ops_queue',
@@ -11859,6 +12060,10 @@ class LocalDb {
     var enviada = 0;
     for (final f in filas) {
       if (!esMia(f)) continue;
+      if (f['estado'] == 'rechazada' &&
+          reconocidas.contains('${f['op_uuid']}')) {
+        continue;
+      }
       if (f['estado'] == 'enviada') {
         enviada++;
       } else {
