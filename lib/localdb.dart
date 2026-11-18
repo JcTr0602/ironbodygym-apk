@@ -3096,11 +3096,11 @@ class LocalDb {
     await db.execute('CREATE TABLE pagos ('
         'id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, '
         'fecha TEXT, cliente_id INTEGER, telegram_user_id INTEGER, metodo TEXT)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha)');
-    await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id, fecha)');
-    await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)');
+    // 1.36 H-C2 (136-923): los índices de pagos nacen por
+    // el punto ÚNICO (_crearIndicesPagosSiExiste), el
+    // mismo de las migraciones — aquí se creaban 3 a mano
+    // y faltaba idx_pagos_metodo en la instalación limpia.
+    await _crearIndicesPagosSiExiste(db);
     // v1.3.1: suplementos lleva ultimo_precio como columna (no en JSON)
     // para no perderlo en cada pull con INSERT OR REPLACE.
     // v1.4.6 (v35): moneda como columna ('CUP'|'USD'), poblada en

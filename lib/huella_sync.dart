@@ -199,6 +199,14 @@ class HuellaSync {
       // Sin sesión no hay fila propia que escribir (RLS manda
       // user_id = auth.uid()): no se emite ni se encola nada.
       if (userId == null || userId.isEmpty) return false;
+      // 1.36 H-C2 (136-922): con device_tag vacío la fila
+      // colisionaría en la PK (user_id, device_tag) con
+      // cualquier otro teléfono sin tag: no se emite y el
+      // motivo queda registrado.
+      if (deviceTag.isEmpty) {
+        await _registrarError('device_tag vacío: emisión omitida');
+        return false;
+      }
       final ultimoResultado = await _db.getMeta(metaHuellaUltimoResultado);
       final ultimoOk =
           int.tryParse(await _db.getMeta(metaHuellaUltimoOkEpoch) ?? '');

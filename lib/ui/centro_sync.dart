@@ -96,6 +96,9 @@ class CentroSyncScreen extends StatefulWidget {
 
 class _CentroSyncScreenState extends State<CentroSyncScreen> {
   bool _cargando = true;
+  // 1.36 H-C2 (136-894): una corrida manual en curso —
+  // el botón se apaga mientras corre.
+  bool _sincronizando = false;
   List<CorridaSync> _corridas = [];
   List<AvisoSync> _avisos = [];
   // SYNC-12 (1.35): null por tabla = «sin leer», no 0.
@@ -204,6 +207,10 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   /// dos resultados distintos según la pantalla desde la
   /// que se tocara.
   void _sincronizarAhora() {
+    // 136-894: guarda síncrona — un segundo toque
+    // mientras corre no lanza otra corrida.
+    if (_sincronizando) return;
+    setState(() => _sincronizando = true);
     unawaited(() async {
       SyncResultado? res;
       try {
@@ -213,6 +220,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
       }
       if (!mounted) return;
       await _cargar();
+      if (mounted) setState(() => _sincronizando = false);
       if (mounted) await _mostrarResumenSync(res);
     }());
   }
@@ -377,9 +385,12 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                   // junto al veredicto, no al final.
                   const SizedBox(height: 12),
                   BotonPrimario(
-                    texto: 'Sincronizar ahora',
+                    texto: _sincronizando
+                        ? 'Sincronizando…'
+                        : 'Sincronizar ahora',
                     icono: Icons.sync_rounded,
-                    onPressed: _sincronizarAhora,
+                    onPressed:
+                        _sincronizando ? null : _sincronizarAhora,
                   ),
                   if (_lecturasFallidas > 0) ...[
                     const SizedBox(height: 16),

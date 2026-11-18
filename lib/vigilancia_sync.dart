@@ -105,13 +105,35 @@ Future<List<AvisoSync>> evaluarVigilanciaSync() async {
   final ahora = ahoraHabana();
 
   SaludSyncDatos? salud;
+  var saludFallo = false;
   try {
     salud = await cargarSaludSync();
-  } catch (_) {}
+  } catch (_) {
+    saludFallo = true;
+  }
   List<CorridaSync> corridas = const [];
+  var diarioFallo = false;
   try {
     corridas = await DiarioSync.instance.historial(limite: 30);
-  } catch (_) {}
+  } catch (_) {
+    diarioFallo = true;
+  }
+  // 1.36 H-C2 (136-910): si una lectura base FALLÓ, la
+  // evaluación es parcial y queda RASTRO distinguible:
+  // «sin avisos» tras un fallo no puede leerse como
+  // «todo bien» (antes los catch no dejaban estado).
+  if (saludFallo || diarioFallo) {
+    avisos.add(AvisoSync(
+      regla: 'SIN_EVALUAR',
+      severidad: SeveridadAvisoSync.info,
+      titulo: 'La vigilancia no se pudo evaluar completa',
+      detalle: 'Una lectura base falló '
+          '(${saludFallo ? 'la salud de la sincronización' : 'el diario de corridas'}): '
+          'los avisos de abajo pueden estar incompletos. '
+          'Revisa la Salud de la sincronización.',
+      destino: 'salud',
+    ));
+  }
 
   // --- A1: primera bajada incompleta (suprime A2/A3). ---
   final a1 = primeraBajadaIncompleta(corridas);

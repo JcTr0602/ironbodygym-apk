@@ -463,18 +463,24 @@ class DiarioSync {
   /// último progreso anotado. Devuelve cuántas cerró.
   Future<int> cerrarHuerfanasComoCortadas({int? ahoraEpoch}) async {
     final d = await _db.db;
-    return d.update(
-      'sync_corridas',
-      {
-        'estado': EstadoCorrida.cortada,
-        'fin_epoch':
-            ahoraEpoch ?? DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        'motivo_no_sello':
-            'La sincronización se interrumpió antes de terminar '
-                '(la app se cerró o otro proceso tomó el relevo).',
-      },
-      where: 'estado = ?',
-      whereArgs: [EstadoCorrida.enCurso],
+    final fin =
+        ahoraEpoch ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // 1.36 H-C2 (136-921): la huérfana también deja su
+    // DURACIÓN honesta (fin − inicio de cada fila), no
+    // solo el estado: antes duracion_ms quedaba null y
+    // el historial la enseñaba sin duración.
+    return d.rawUpdate(
+      'UPDATE sync_corridas SET estado = ?, fin_epoch = ?, '
+      'duracion_ms = (? - inicio_epoch) * 1000, '
+      'motivo_no_sello = ? WHERE estado = ?',
+      [
+        EstadoCorrida.cortada,
+        fin,
+        fin,
+        'La sincronización se interrumpió antes de terminar '
+            '(la app se cerró o otro proceso tomó el relevo).',
+        EstadoCorrida.enCurso,
+      ],
     );
   }
 
@@ -803,8 +809,12 @@ class DiarioSync {
     if (raw == null || raw.isEmpty) return null;
     try {
       final m = jsonDecode(raw) as Map;
+      // 1.36 H-C2 (136-921): un valor ilegible degrada
+      // SOLO su clave (a null, «no publicado»): antes un
+      // solo cast malo tumbaba TODOS los conteos.
       return {
-        for (final e in m.entries) '${e.key}': (e.value as num?)?.toInt(),
+        for (final e in m.entries)
+          '${e.key}': e.value is num ? (e.value as num).toInt() : null,
       };
     } catch (_) {
       return null;

@@ -135,9 +135,7 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
     h.add(HallazgoReparacion(
       '${f.opsError} ${_n(f.opsError, 'operación falló', 'operaciones fallaron')} al enviarse',
       'Fallaron por conexión o por un error pasajero: al '
-          'reparar se reintentan.'
-      ' Pueden incluir operaciones de otra cuenta de '
-          'este teléfono: solo se suben las de la sesión activa.',
+          'reparar se reintentan.',
       ClaseHallazgo.auto,
     ));
   }
@@ -145,9 +143,7 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
     h.add(HallazgoReparacion(
       '${f.opsEnviadas} ${_n(f.opsEnviadas, 'operación espera', 'operaciones esperan')} confirmación',
       'Ya se enviaron y el servidor aún no las confirma: al '
-          'reparar se confirman.'
-      ' Pueden incluir operaciones de otra cuenta de '
-          'este teléfono: solo se suben las de la sesión activa.',
+          'reparar se confirman.',
       ClaseHallazgo.auto,
     ));
   }
@@ -155,9 +151,19 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
     h.add(HallazgoReparacion(
       '${f.opsPendientes} ${_n(f.opsPendientes, 'operación por subir', 'operaciones por subir')}',
       'Están guardadas en este teléfono esperando envío: al '
-          'reparar se suben.'
-      ' Pueden incluir operaciones de otra cuenta de '
-          'este teléfono: solo se suben las de la sesión activa.',
+          'reparar se suben.',
+      ClaseHallazgo.auto,
+    ));
+  }
+  // 1.36 H-C2 (136-902): la advertencia de las ops de
+  // otra cuenta se emite UNA sola vez (antes salía en
+  // los tres detalles de ops y se leía tres veces).
+  if (f.opsError > 0 || f.opsEnviadas > 0 || f.opsPendientes > 0) {
+    h.add(const HallazgoReparacion(
+      'Los conteos son de este teléfono',
+      'Pueden incluir operaciones de otra cuenta de este '
+          'teléfono: al reparar solo se suben las de la '
+          'sesión activa.',
       ClaseHallazgo.auto,
     ));
   }

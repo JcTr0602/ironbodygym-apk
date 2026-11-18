@@ -121,10 +121,18 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   Future<void> _sincronizar() async {
     // 1.34 Campo 2 (P-7): regla de Jc — fresco (≤10 min)
     // solo relee lo local; viejo baja el alcance primero.
-    if (!await SyncEngine.instance.datosFrescos()) {
-      await SyncEngine.instance.sincronizarScope('incidencias_sync');
+    // 1.36 H-C2 (136-906): si la sincronización FALLA se
+    // dice como aviso (antes la excepción quedaba sin
+    // atrapar y la pantalla no decía nada).
+    try {
+      if (!await SyncEngine.instance.datosFrescos()) {
+        await SyncEngine.instance.sincronizarScope('incidencias_sync');
+      }
+      await _cargar();
+    } catch (e) {
+      AppLog.error('incidencias_sync', 'sincronizar_fallo', d: '$e');
+      _aviso('No se pudo sincronizar: ${mensajeErrorAmable(e)}');
     }
-    await _cargar();
   }
 
   Future<void> _aprobar(Map<String, dynamic> inc) async {

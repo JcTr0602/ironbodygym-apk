@@ -3889,8 +3889,17 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
   String _txtCorrida(CorridaSync c) {
     final h = aHabana(c.inicio);
     String p(int n) => n.toString().padLeft(2, '0');
+    // 1.36 H-C2 (136-921): el detalle de «última
+    // corrida» dice su desenlace cuando no fue completa
+    // — una cortada no se presenta como una normal.
+    final desenlace = switch (c.estado) {
+      EstadoCorrida.cortada => ' · interrumpida',
+      EstadoCorrida.parcial => ' · parcial',
+      EstadoCorrida.fallida => ' · fallida',
+      _ => '',
+    };
     return 'Corrida de ${p(h.hour)}:${p(h.minute)} '
-        'del ${p(h.day)}/${p(h.month)}';
+        'del ${p(h.day)}/${p(h.month)}$desenlace';
   }
 
   Future<void> _cargarSubidos() async {

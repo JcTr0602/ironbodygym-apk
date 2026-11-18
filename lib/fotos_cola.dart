@@ -23,6 +23,18 @@ import 'fotos_qos.dart';
 import 'tiempo.dart';
 import 'sync.dart' show SyncEngine, EstadoSubida;
 
+/// 1.36 H-C2 (136-934, pura): ¿es un archivo TEMPORAL de
+/// foto? Los temporales reales de variantes llevan el
+/// `.tmp` EN EL MEDIO (`<base>-thumb.tmp.webp`, desde la
+/// 1.34) y los legados al final (`...webp.tmp`). El
+/// barrido de huérfanos los trata con el umbral de
+/// temporales (24 h), no con el de finales (2 h): un
+/// temporal a medio generar no es un final huérfano.
+bool esTemporalFoto(String ruta) {
+  final nombre = ruta.split('/').last;
+  return nombre.contains('.tmp.') || nombre.endsWith('.tmp');
+}
+
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
 /// ya delega a hilos nativos y compute() no tiene MethodChannels.
 /// v1.2.9+43 (Gemini R3): escritura temporal + rename atómico.
@@ -2410,7 +2422,9 @@ class FotosColaService {
         if (e is File) {
           try {
             final modificado = await e.lastModified();
-            if (e.path.endsWith('.tmp')) {
+            // 136-934: temporales reales (.tmp. en el
+            // nombre), no solo el sufijo legado.
+            if (esTemporalFoto(e.path)) {
               if (modificado.isBefore(umbralTmp)) {
                 await e.delete();
                 borrados++;
