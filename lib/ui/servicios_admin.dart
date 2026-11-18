@@ -239,15 +239,20 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       builder: (ctx) => const _DialogoReponerAgua(),
     );
     if (datos == null) return;
+    // (1.36 H-A2 136-731) el costo se valida ANTES de encolar:
+    // un costo no numérico, no finito o negativo se dice aquí
+    // en vez de encolar un 0 que el servicio rechaza después.
+    final costoCrudo =
+        double.tryParse(datos.costo.trim().replaceAll(',', '.'));
+    if (costoCrudo == null || !costoCrudo.isFinite || costoCrudo <= 0) {
+      _aviso('El costo del agua no es válido: escribe un importe '
+          'mayor que 0.', error: true);
+      return;
+    }
     try {
-      // Clase N-2 (#2): lo no finito cae al 0 «inválido» que el
-      // servicio ya rechaza (NaN pasaba su validación <= 0).
-      final costoCrudo =
-          double.tryParse(datos.costo.trim().replaceAll(',', '.'));
       await reponerAguaServicio(
         cantidad: int.tryParse(datos.cantidad.trim()) ?? 0,
-        costoUnitario:
-            (costoCrudo != null && costoCrudo.isFinite) ? costoCrudo : 0,
+        costoUnitario: costoCrudo,
       );
       _aviso('Entrada de agua registrada');
       await _cargar();
@@ -321,13 +326,25 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       ),
     );
     if (datos == null) return;
+    // (136-731) costo del bote: vacío = «sin costo nuevo»
+    // (opcional legítimo); con texto, debe ser finito y > 0 —
+    // antes un texto inválido se volvía null en silencio y el
+    // bote se abría con el costo viejo sin que nadie lo supiera.
+    final costoTexto = datos.costo.trim();
+    final costo = costoTexto.isEmpty
+        ? null
+        : double.tryParse(costoTexto.replaceAll(',', '.'));
+    if (costoTexto.isNotEmpty &&
+        (costo == null || !costo.isFinite || costo <= 0)) {
+      _aviso('El costo del bote no es válido: déjalo vacío o '
+          'escribe un importe mayor que 0.', error: true);
+      return;
+    }
     try {
-      final costo =
-          double.tryParse(datos.costo.trim().replaceAll(',', '.'));
       await abrirBoteServicio(
         suplementoId: datos.supId,
         dosisRendimiento: int.tryParse(datos.rendimiento.trim()) ?? 0,
-        costoBote: (costo != null && costo > 0) ? costo : null,
+        costoBote: costo,
       );
       _aviso('Bote abierto: sus dosis van al pomo principal '
           '(se sincronizará)');

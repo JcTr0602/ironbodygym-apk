@@ -38,8 +38,12 @@ class _Metrica {
     this.esMoneda = true,
   });
 
-  double get deltaPct {
-    if (anteriorMTD == 0) return actual > 0 ? 100 : 0;
+  /// (1.36 H-A2 136-735) sin base no hay porcentaje: con el
+  /// período anterior en 0 el delta es null y la tarjeta pinta
+  /// «Sin base» — antes un mes que arrancaba de cero enseñaba
+  /// «+100 %» inventado.
+  double? get deltaPct {
+    if (anteriorMTD == 0) return null;
     return ((actual - anteriorMTD) / anteriorMTD) * 100;
   }
 }
@@ -116,10 +120,25 @@ class _ComparativaMensualState
 
   Future<int> _contarActivos(
       String desde, String hasta) async {
-    // Clientes con pago en el rango
+    // Clientes con pago en el rango.
+    // (136-735) con las exclusiones canónicas de pagos, las
+    // mismas de _sumarPagos/pagosDelPeriodo: cortesía, Casa
+    // (fila o cuenta) y anulados (espejo o anulación en cola)
+    // no hacen «activo» a nadie.
+    final casas = await LocalDb.instance.idsCuentasCasa();
+    final anuladosCola =
+        await LocalDb.instance.pagosAnuladosEnCola();
     final vistos = <String>{};
     for (final p in await LocalDb.instance
         .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
+      if ((p['metodo'] as String?) == 'cortesia') continue;
+      if (p['casa'] == 1 || p['casa'] == true) continue;
+      final cidCrudo = p['cliente_id'];
+      final cidInt = cidCrudo is num
+          ? cidCrudo.toInt()
+          : (cidCrudo is String ? int.tryParse(cidCrudo) : null);
+      if (cidInt != null && casas.contains(cidInt)) continue;
+      if (esPagoAnulado(p, anuladosCola)) continue;
       final cid = '${p['cliente_id'] ?? ''}';
       if (cid.isNotEmpty) vistos.add(cid);
     }
@@ -326,7 +345,7 @@ class _ComparativaMensualState
 
   Widget _buildTarjeta(_Metrica m) {
     final delta = m.deltaPct;
-    final esPositivo = delta >= 0;
+    final esPositivo = (delta ?? 0) >= 0;
     // F2-15: dinero con fmtMonto + «CUP» (antes '$' a mano
     // sin moneda, fuera del formato único de la casa).
     String fmt(double v) => m.esMoneda
@@ -373,17 +392,25 @@ class _ComparativaMensualState
                           horizontal: 6,
                           vertical: 2),
                   decoration: BoxDecoration(
-                    color: esPositivo
-                        ? AppColores.exito.withValues(alpha: 0.12)
-                        : AppColores.error.withValues(alpha: 0.12),
+                    color: delta == null
+                        ? AppColores.textoSecundario(context)
+                            .withValues(alpha: 0.12)
+                        : esPositivo
+                            ? AppColores.exito.withValues(alpha: 0.12)
+                            : AppColores.error.withValues(alpha: 0.12),
                     borderRadius:
                         BorderRadius.circular(AppRadio.sm),
                   ),
                   child: Text(
-                    '${esPositivo ? '+' : ''}${delta.toStringAsFixed(1)}%',
-                    style: AppTexto.metadato.copyWith(color: esPositivo
-                          ? AppColores.exitoOscuro
-                          : AppColores.errorOscuro, fontWeight: FontWeight.bold),
+                    // (136-735) sin base: rótulo, no porcentaje.
+                    delta == null
+                        ? 'Sin base'
+                        : '${esPositivo ? '+' : ''}${delta.toStringAsFixed(1)}%',
+                    style: AppTexto.metadato.copyWith(color: delta == null
+                          ? AppColores.textoSecundario(context)
+                          : esPositivo
+                              ? AppColores.exitoOscuro
+                              : AppColores.errorOscuro, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],

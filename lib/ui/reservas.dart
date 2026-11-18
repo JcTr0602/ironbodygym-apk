@@ -436,6 +436,9 @@ class _ReservasScreenState extends State<ReservasScreen> {
   /// sincronización corre (o falla).
   final Set<int> _enCurso = {};
   bool _cargando = true;
+  // (1.36 H-A2 136-741) fallo de la carga: no se pinta como
+  // bandeja vacía sana.
+  String? _errorCarga;
 
   bool get _puedeAcceder =>
       widget.accesoPermitido ??
@@ -461,6 +464,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // (136-741) y se PINTA como error con reintento.
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -485,6 +490,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
       _bandeja = construirBandeja(reservas, clientes, suplementos,
           esDueno: AuthService().isOwner);
       _conOpPendiente = reservasConOpPendiente(ops);
+      _errorCarga = null;
       _cargando = false;
     });
   }
@@ -562,6 +568,28 @@ class _ReservasScreenState extends State<ReservasScreen> {
       // espejo dejaba encolar la acción contradictoria.
       final opsFrescas = await LocalDb.instance.pendingOpsLectura();
       final conOp = reservasConOpPendiente(opsFrescas).contains(rid);
+      // (1.36 H-A2 136-743) el VENCIMIENTO también se revalida
+      // aquí, tras los awaits y junto al estado: la solicitud o
+      // el apartado pudieron vencer mientras el diálogo estaba
+      // abierto, y encolar sobre una reserva vencida es un
+      // rebote seguro del servidor.
+      var vencida = false;
+      if (filas.isNotEmpty &&
+          (estadoActual == 'solicitada' ||
+              estadoActual == 'reservada')) {
+        final venceTxt = '${filas.first['expira_en'] ?? ''}';
+        final vence =
+            venceTxt.isEmpty ? null : DateTime.tryParse(venceTxt);
+        vencida = vence != null && vence.isBefore(ahoraHabana());
+      }
+      if (vencida) {
+        if (mounted) {
+          mostrarSnack(context, 'La reserva venció mientras confirmabas. '
+                  'Se actualizó la bandeja; el servidor ya la liberó.', significado: SignificadoChip.alerta);
+          await _cargar();
+        }
+        return;
+      }
       if (estadoActual == null ||
           !requeridos.contains(estadoActual) ||
           conOp) {
@@ -808,7 +836,25 @@ class _ReservasScreenState extends State<ReservasScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando reservas…')
-          : b == null ||
+          : _errorCarga != null &&
+                  (b == null ||
+                      (b.solicitadas.isEmpty &&
+                          b.reservadas.isEmpty &&
+                          b.historial.isEmpty))
+              // (136-741) un fallo de lectura NO es una bandeja
+              // vacía: EstadoError con «Reintentar».
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar las reservas',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : b == null ||
                   (b.solicitadas.isEmpty &&
                       b.reservadas.isEmpty &&
                       b.historial.isEmpty)

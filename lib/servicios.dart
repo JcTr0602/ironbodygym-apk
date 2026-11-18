@@ -2105,12 +2105,25 @@ Future<List<String>> registrarVentaMultipleServicio({
 
 /// Salida sin venta contra un pomo. Cortesía y consumo de staff los
 /// impone el servidor como solo-dueño; la UI también los gatea.
+/// (1.36 H-A2 136-731) motivos de salida que el servidor
+/// acepta en la op `salida_servicio`. Validar ANTES de encolar:
+/// un motivo fuera del enum nacía condenado a rebotar.
+const motivosSalidaServicio = <String>{
+  'merma',
+  'cortesia',
+  'consumo_staff',
+  'ajuste',
+};
+
 Future<String> registrarSalidaServicio({
   required int pomoId,
   required int dosis,
   required String motivo, // merma | cortesia | consumo_staff | ajuste
   String? nota,
 }) async {
+  if (!motivosSalidaServicio.contains(motivo)) {
+    throw Exception('Motivo de salida no válido: $motivo');
+  }
   if (dosis < 1) throw Exception('La salida debe ser de al menos 1 dosis');
   // Argón Servicios #10: la salida no puede superar el saldo
   // local del pomo (un dedo de más —22 por 2— dejaba el saldo
@@ -2152,6 +2165,9 @@ Future<String> registrarSalidaAguaServicio({
   required String motivo, // merma | cortesia | consumo_staff | ajuste
   String? nota,
 }) async {
+  if (!motivosSalidaServicio.contains(motivo)) {
+    throw Exception('Motivo de salida no válido: $motivo');
+  }
   if (cantidad < 1) throw Exception('La salida debe ser de al menos 1 pomo');
   // Argón Servicios #10: tampoco del agua común.
   // 1.22 PF-6: validación + encolado en una transacción.

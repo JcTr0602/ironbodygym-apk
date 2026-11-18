@@ -647,6 +647,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
     // Ítems 5 y 7 (Argón): el formulario nace posicionado en el
     // primer método HABILITADO del producto.
+    // (1.36 H-A2 136-731) sin método activo para el tipo, la
+    // venta no se abre: antes caía a 'efectivo' de respaldo y
+    // la op nacía condenada a rebotar en el servidor.
+    if (primerMetodoServicioActivo(_ajustes, tipo) == null) {
+      _aviso(
+          'No hay ningún método de pago activo para este '
+          'servicio: actívalo en los precios de Servicios.',
+          error: true);
+      return;
+    }
     final metodoInicial =
         primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
     // 1.25 T34: tope SILENCIOSO del selector de cantidad de
@@ -749,6 +759,25 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             'Vendes a tu nombre pero no tienes un pomo propio '
             'de este suplemento: abre uno en Administración o '
             'vende a nombre del titular del pomo',
+            error: true);
+        return;
+      }
+    }
+    // (136-720) revalidación del tope contra el pomo EFECTIVO:
+    // el selector topó contra el pomo a la vista, pero si el
+    // dueño vende «a nombre de: Yo» desde el pomo de un
+    // entrenador, la venta sale de SU pomo principal — cuyo
+    // saldo puede ser menor que la cantidad elegida.
+    if (_esDueno &&
+        tipo != 'agua_suelta' &&
+        pomoVenta != null &&
+        !identical(pomoVenta, _pomoActual)) {
+      final saldoEfectivo =
+          await saldoPomoLocal((pomoVenta['id'] as num).toInt());
+      if (cantidad > saldoEfectivo) {
+        _aviso(
+            'Tu pomo principal solo tiene $saldoEfectivo dosis: '
+            'ajusta la cantidad o vende a nombre del titular.',
             error: true);
         return;
       }
@@ -1077,6 +1106,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           if (topeEfectivo >= 2 && n > topeEfectivo) {
             n = topeEfectivo;
           }
+          // (1.36 H-A2 136-720) al cambiar el titular cambia el
+          // pomo efectivo (y con él n): m se re-topa en el acto —
+          // m = min(m, n, topePomos) — en vez de quedar por
+          // encima de las dosis o del agua disponible.
+          if (m > n) m = n;
+          if (m > topePomos) m = topePomos;
           final precioSin =
               precioServicioMetodo(_ajustes, 'dosis_sin_agua', metodo);
           final precioCon =
@@ -2577,7 +2612,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final esReverso = (v['reverso_de'] as num?) != null;
     final yaReversada =
         _reversadas.contains((v['id'] as num?)?.toInt());
-    final esCasa = (v['casa'] as num?)?.toInt() == 1;
+    // (1.36 H-A2 136-719) casa tolerante: el espejo puede traer
+    // true/'1' y el cast a num dejaba la venta de Casa como
+    // normal (icono, insignia y atenuado equivocados).
+    final esCasa = esCasaTolerante(v['casa']);
     // 1.28 (M3-C5): la fila en cola (aún solo en este
     // teléfono) y los estados con su chip: la lista deja de
     // mezclar en silencio lo firme con lo pendiente.
@@ -2595,8 +2633,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // su insignia; si el dueño la registró a MI nombre, también.
     final vendTid = LocalDb.normalizarTelegramId(v['vendedor_id']);
     final regTid = LocalDb.normalizarTelegramId(v['registrado_por']);
-    final pomoEsMio = _misPomos.any((l) =>
-        (l['id'] as num?)?.toInt() == (v['pomo_id'] as num?)?.toInt());
+    // (136-719) pomo_id NO nulo antes de comparar: con ambos
+    // nulos, una venta sin pomo se pintaba «de mi pomo».
+    final pomoVentaId = (v['pomo_id'] as num?)?.toInt();
+    final pomoEsMio = pomoVentaId != null &&
+        _misPomos.any((l) => (l['id'] as num?)?.toInt() == pomoVentaId);
     String? insignia;
     if (!_esDueno && !esReverso && !esCasa && vendTid != null) {
       if (pomoEsMio && vendTid != _miTid) {
