@@ -54,11 +54,19 @@ class ImagenCierreNomina extends StatelessWidget {
     required this.mesEtiqueta,
     required this.filas,
     required this.generadoEtiqueta,
+    this.individual = false,
   });
 
   /// 'Octubre de 2026'.
   final String mesEtiqueta;
   final List<FilaCierreNomina> filas;
+
+  /// 1.36 CAMPO C-2: foto de UN solo entrenador. Misma
+  /// marca y formato que la conjunta; cambia el total:
+  /// pasa a ser SU neto (la conjunta suma «a pagar» y
+  /// excluye a los ya liquidados; la individual es el
+  /// resumen personal de ese entrenador, cobrado o no).
+  final bool individual;
 
   /// 'Generada el 31 de octubre de 2026'.
   final String generadoEtiqueta;
@@ -88,7 +96,11 @@ class ImagenCierreNomina extends StatelessWidget {
     // Yunque R5-M8-2: «TOTAL A PAGAR» suma solo a quien NO
     // está liquidado (ya cobró: no es «a pagar»), el mismo
     // criterio que netoTotalDueno de la foto de nómina.
-    final total = totalAPagarCierre(filas);
+    // 1.36 CAMPO C-2: en la individual el total es el neto
+    // del entrenador de la foto, esté liquidado o no.
+    final total = individual
+        ? filas.fold<double>(0, (s, f) => s + f.neto)
+        : totalAPagarCierre(filas);
     // SL-5B G07-10: el ancho es min(340, pantalla −
     // márgenes): a 360 dp la imagen medía 340 fijos y
     // el diálogo la recortaba al prepararla para
@@ -172,10 +184,12 @@ class ImagenCierreNomina extends StatelessWidget {
                 const Divider(color: Color(0xFF333338), height: 26),
                 Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'TOTAL A PAGAR',
-                        style: TextStyle(
+                        // 1.36 CAMPO C-2: en la individual
+                        // la fila del total es su neto.
+                        individual ? 'NETO A PAGAR' : 'TOTAL A PAGAR',
+                        style: const TextStyle(
                           color: _textoSuave,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,

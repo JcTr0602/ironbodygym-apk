@@ -218,9 +218,16 @@ class _NominaScreenState extends State<NominaScreen> {
   /// que la imagen nunca discrepa de lo que el dueño está
   /// viendo. Se captura con RepaintBoundary y se comparte
   /// como PNG.
-  Future<void> _mostrarFotoCierre() async {
+  /// 1.36 CAMPO C-2: con [solo] (la clave del entrenador)
+  /// la foto lleva SOLO su fila — misma marca y formato,
+  /// el total pasa a ser su neto — para enviársela en
+  /// particular sin enseñar el neto del otro (privacidad).
+  /// Entradas: el botón «Compartir su foto» de su tarjeta
+  /// en esta pantalla y los «Solo <nombre>» de la vista
+  /// conjunta. Sin [solo], la conjunta de siempre.
+  Future<void> _mostrarFotoCierre({String? solo}) async {
     final base = _clientesPagados * _tarifa;
-    final filas = <FilaCierreNomina>[];
+    final porEnt = <String, FilaCierreNomina>{};
     // Yunque R5-M8-1/M8-6: el mes de la foto es el mes
     // CARGADO en pantalla (el pref de _cargarDatos), no el
     // reloj de este instante: cruzar la medianoche del
@@ -280,7 +287,7 @@ class _NominaScreenState extends State<NominaScreen> {
               );
         }
       }
-      filas.add(FilaCierreNomina(
+      porEnt[ent] = FilaCierreNomina(
         nombre: persona.nombre,
         base: baseFila,
         bono: bono,
@@ -289,8 +296,13 @@ class _NominaScreenState extends State<NominaScreen> {
         deuda: deuda,
         neto: neto,
         liquidada: liquidada,
-      ));
+      );
     }
+    // 1.36 CAMPO C-2: la individual se queda con la fila
+    // del entrenador pedido; la conjunta, con todas.
+    final filas = solo == null
+        ? porEnt.values.toList()
+        : [if (porEnt[solo] != null) porEnt[solo]!];
     if (filas.isEmpty) {
       if (mounted) {
         mostrarSnack(context, 'Aún no hay nómina que fotografiar.');
@@ -310,13 +322,16 @@ class _NominaScreenState extends State<NominaScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Foto del cierre de mes'),
+        title: Text(solo == null
+            ? 'Foto del cierre de mes'
+            : 'Foto de ${filas.first.nombre}'),
         content: SingleChildScrollView(
           child: RepaintBoundary(
             key: boundaryKey,
             child: ImagenCierreNomina(
               mesEtiqueta: mesEtiqueta,
               filas: filas,
+              individual: solo != null,
               generadoEtiqueta: 'Generada el ${ahora.day} de '
                   '${_nombreMes(ahora.month).toLowerCase()} de '
                   '${ahora.year} · Iron Body Gym',
@@ -324,6 +339,18 @@ class _NominaScreenState extends State<NominaScreen> {
           ),
         ),
         actions: [
+          // 1.36 CAMPO C-2: desde la vista conjunta, saltar
+          // a la foto de un solo entrenador sin volver a la
+          // pantalla (el otro sitio es su tarjeta).
+          if (solo == null)
+            for (final e in porEnt.entries)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  _mostrarFotoCierre(solo: e.key);
+                },
+                child: Text('Solo ${e.value.nombre}'),
+              ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Cerrar'),
@@ -353,15 +380,21 @@ class _NominaScreenState extends State<NominaScreen> {
                         final dir = await getTemporaryDirectory();
                         final f = await File(
                                 '${dir.path}/cierre_nomina_'
-                                '$prefFoto.png')
+                                '$prefFoto'
+                                '${solo == null ? '' : '_$solo'}.png')
                             .writeAsBytes(datos.buffer.asUint8List());
                         await Share.shareXFiles([XFile(f.path)],
-                            text: 'Cierre de nómina · $mesEtiqueta · '
-                                'Iron Body Gym\n'
-                                // R5-M8-3: es un mensaje que
-                                // compone el sistema: lleva la
-                                // línea oficial de cierre.
-                                '$lineaMensajeAutomatico');
+                            text: solo == null
+                                ? 'Cierre de nómina · $mesEtiqueta · '
+                                    'Iron Body Gym\n'
+                                    // R5-M8-3: es un mensaje que
+                                    // compone el sistema: lleva la
+                                    // línea oficial de cierre.
+                                    '$lineaMensajeAutomatico'
+                                : 'Cierre de nómina de '
+                                    '${filas.first.nombre} · '
+                                    '$mesEtiqueta · Iron Body Gym\n'
+                                    '$lineaMensajeAutomatico');
                       } catch (_) {
                         mostrarSnackEnMessenger(messengerFoto,
                             'No se pudo compartir la imagen',
@@ -783,6 +816,22 @@ class _NominaScreenState extends State<NominaScreen> {
               neto: total,
               descuentos: adelantosF + deudaF,
             ),
+            // 1.36 CAMPO C-2: la foto SOLO de este
+            // entrenador, para enviársela en particular
+            // sin enseñar el neto del otro (privacidad).
+            // Solo el dueño comparte fotos del cierre.
+            if (AuthService().isOwner &&
+                _personasAdelantos.containsKey(ent)) ...[
+              const SizedBox(height: AppEspacio.md),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: BotonSecundario(
+                  texto: 'Compartir su foto',
+                  icono: Icons.share_rounded,
+                  onPressed: () => _mostrarFotoCierre(solo: ent),
+                ),
+              ),
+            ],
             if (_personasAdelantos.containsKey(ent))
               _seccionAdelantos(context, ent),
           ],
