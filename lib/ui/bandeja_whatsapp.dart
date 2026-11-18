@@ -28,6 +28,7 @@ import 'componentes.dart';
 import 'skeleton.dart';
 import 'dialogo_telefono.dart';
 import 'diseno.dart';
+import 'tarjetas_wa.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -466,6 +467,45 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
         mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
       }
     }
+  }
+
+  /// 1.36 (136-294): la TARJETA de aviso de vencimiento de
+  /// este cliente — imagen+texto por la hoja de compartir
+  /// (el botón wa.me de la fila sigue como siempre para el
+  /// texto solo). La fecha sale del espejo del cliente; sin
+  /// fecha no hay tarjeta de vencimiento que pintar.
+  /// Precios: la tarjeta admite el bloque de precios, pero
+  /// la bandeja no tiene las tarifas vigentes en el aviso
+  /// (trae tipo/nombre/detalle/mensaje) — excepción
+  /// nombrada en T_TARJETAS.md: la tarjeta sale sin el
+  /// bloque de precios hasta que el aviso los transporte.
+  Future<void> _abrirTarjetaAviso(Map<String, dynamic> a) async {
+    final cid = (a['cliente_id'] as num?)?.toInt();
+    String? ph;
+    if (cid != null) {
+      final filas = await LocalDb.instance.mirrorPorIds('clientes', [cid]);
+      if (filas.isNotEmpty) {
+        final v = '${filas.first['pagado_hasta'] ?? ''}'.trim();
+        if (v.length >= 10) ph = v.substring(0, 10);
+      }
+    }
+    if (!mounted) return;
+    if (ph == null) {
+      mostrarSnack(context,
+          'Este aviso no tiene fecha de vencimiento para la tarjeta.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    await mostrarCompartirTarjetaWa(
+      context,
+      tarjeta: TarjetaWaAviso(
+        nombre: '${a['nombre'] ?? 'Cliente'}',
+        vencimientoIso: ph,
+        yaVencido: '${a['tipo']}' == 'vencido',
+      ),
+      texto: '${a['mensaje'] ?? ''}',
+      nombreArchivo: 'tarjeta_aviso',
+    );
   }
 
   /// W9: muestra el editor del mensaje y devuelve el texto
@@ -944,6 +984,31 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                 ),
               ),
               const SizedBox(width: 8),
+              // 1.36 (136-294): la tarjeta de aviso (imagen)
+              // solo en los avisos de vencimiento; el botón
+              // de texto de siempre queda intacto a su lado.
+              if (const {'vencido', 'vence_hoy', 'por_vencer'}
+                  .contains('${a['tipo']}'))
+                InkWell(
+                  borderRadius: BorderRadius.circular(AppRadio.xl),
+                  onTap: () => _abrirTarjetaAviso(a),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColores.superficie(context),
+                      border:
+                          Border.all(color: AppColores.borde(context)),
+                    ),
+                    child: Icon(Icons.image_rounded,
+                        color: AppColores.textoSecundario(context),
+                        size: 20),
+                  ),
+                ),
+              if (const {'vencido', 'vence_hoy', 'por_vencer'}
+                  .contains('${a['tipo']}'))
+                const SizedBox(width: 6),
               // Botón WhatsApp: verde reconocible, 1 toque.
               InkWell(
                 borderRadius: BorderRadius.circular(AppRadio.xl),
