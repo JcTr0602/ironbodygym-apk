@@ -954,7 +954,7 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
                   padding: const EdgeInsets.all(AppEspacio.md),
                   child: Column(
                     children: [
-                      Text(
+                      const Text(
                         'No se pudo cargar la lista de clientes.',
                         style: AppTexto.secundario,
                         textAlign: TextAlign.center,
