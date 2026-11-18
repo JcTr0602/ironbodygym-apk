@@ -24,6 +24,8 @@ import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_log.dart';
+
 /// Una marca personal tal como la devuelve el servidor,
 /// con su estado de verificación.
 class MarcaServidor {
@@ -123,11 +125,28 @@ class MarcasClienteService {
     if (crudas is! List) {
       throw StateError('Respuesta inesperada del servidor (marcas).');
     }
-    return [
-      for (final f in crudas)
-        if (f is Map)
-          MarcaServidor.desdeRpc(Map<String, dynamic>.from(f)),
-    ];
+    // 1.36 H-C1 (136-562): las filas no-Map se CUENTAN y
+    // se registran; si TODAS llegaron corruptas, la
+    // consulta falla visible en vez de devolver un
+    // «sin marcas» falso.
+    final buenas = <MarcaServidor>[];
+    var descartadas = 0;
+    for (final f in crudas) {
+      if (f is Map) {
+        buenas.add(
+            MarcaServidor.desdeRpc(Map<String, dynamic>.from(f)));
+      } else {
+        descartadas++;
+      }
+    }
+    if (descartadas > 0) {
+      AppLog.aviso('marcas_cliente', 'filas_descartadas',
+          d: '$descartadas de ${crudas.length}');
+    }
+    if (buenas.isEmpty && crudas.isNotEmpty) {
+      throw StateError('Respuesta inesperada del servidor (marcas).');
+    }
+    return buenas;
   }
 
   /// Verifica la marca [marcaId]: el servidor registra

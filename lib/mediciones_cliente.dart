@@ -192,6 +192,10 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
       'medidas': p['medidas'] is Map
           ? Map<String, dynamic>.from(p['medidas'] as Map)
           : <String, dynamic>{},
+      // 1.36 H-C1 (136-561): la op SÍ trae quién registró
+      // (registrado_por al encolar): la fila reconstruida
+      // lo conserva y el «Por:» no sale vacío.
+      'registrado_por': p['registrado_por'],
       'espejado': false,
     };
   }

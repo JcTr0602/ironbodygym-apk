@@ -1572,6 +1572,15 @@ class _ListasScreenState extends State<ListasScreen>
     // tras la lista principal, con sus mismas filas.
     final hayCola = cola != null && cola.isNotEmpty;
     if (rows.isEmpty && !hayCola) {
+      // 1.36 H-C1 (136-584): con el vacío pintado, la pila
+      // (búsqueda/orden/pestañas) vuelve a desplegarse: es
+      // el control que permite salir del vacío y no puede
+      // quedar plegado detrás del scroll.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_pilaVisible) {
+          setState(() => _pilaVisible = true);
+        }
+      });
       // 1.25 Panel 14: la causa manda — si la carga falló,
       // el vacío lo dice y ofrece reintentar (antes que la
       // búsqueda y que el «nadie vence» de la pestaña).
@@ -1643,13 +1652,41 @@ class _ListasScreenState extends State<ListasScreen>
       child: NotificationListener<UserScrollNotification>(
         onNotification: _alDesplazarLista,
         child: ListView.separated(
-        itemCount:
-            desplaza + rows.length + (hayCola ? cola.length + 1 : 0),
+        itemCount: (_falloCarga ? 1 : 0) +
+            desplaza +
+            rows.length +
+            (hayCola ? cola.length + 1 : 0),
         separatorBuilder: (_, __) => Divider(
             height: 1,
             indent: 84,
             color: AppColores.borde(context)),
         itemBuilder: (ctx, i) {
+          // 1.36 H-C1 (136-585): con filas en memoria, una
+          // recarga fallida se AVISA arriba (datos
+          // desactualizados + Reintentar), no se calla.
+          if (_falloCarga && i == 0) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off_rounded,
+                      size: 18, color: AppColores.alerta),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                        'Datos desactualizados: la última '
+                        'recarga falló.',
+                        style: AppTexto.secundario),
+                  ),
+                  TextButton(
+                    onPressed: _cargar,
+                    child: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            );
+          }
+          if (_falloCarga) i -= 1;
           if (desplaza == 1 && i == 0) {
             return Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),

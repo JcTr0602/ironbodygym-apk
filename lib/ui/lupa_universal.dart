@@ -331,6 +331,9 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
   // 1.36 H-B2 (136-572): la primera carga del espejo se
   // distingue del vacío: hasta que termina, hay indicador.
   bool _cargando = true;
+  // 1.36 H-C1 (136-571): el fallo del espejo tiene estado
+  // propio (con Reintentar); ya no se funde con el vacío.
+  bool _errorCarga = false;
 
   @override
   void initState() {
@@ -353,16 +356,36 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
       final filas = await LocalDb.instance.allMirror('clientes');
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
+      // 1.36 H-C1 (136-573): poda de recientes caducos al
+      // cargar — cliente que ya no está en el espejo o
+      // función que ya no existe en el catálogo.
+      final idsClientes = {for (final c in filas) '${c['id']}'};
+      final idsFunciones = {for (final f in catalogoFuncionesPanel) f.id};
+      final guardados =
+          prefs.getStringList(_kRecientesLupa) ?? const [];
+      final vigentes = guardados
+          .where((r) => r.startsWith('cliente:')
+              ? idsClientes.contains(r.substring(8))
+              : idsFunciones.contains(r))
+          .toList();
+      if (vigentes.length != guardados.length) {
+        await prefs.setStringList(_kRecientesLupa, vigentes);
+      }
       setState(() {
         _clientes = filas;
-        _recientes =
-            prefs.getStringList(_kRecientesLupa) ?? const [];
+        _recientes = vigentes;
         _cargando = false;
+        _errorCarga = false;
       });
     } catch (_) {
-      // Sin espejo legible, la lupa enseña el campo y el aviso
-      // de vacío honesto; jamás resultados inventados.
-      if (mounted) setState(() => _cargando = false);
+      // 1.36 H-C1 (136-571): el fallo se DICE (estado de
+      // error con Reintentar), no se disfraza de vacío.
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _errorCarga = true;
+        });
+      }
     }
   }
 
@@ -471,7 +494,14 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
                   ? const EstadoCargando(
                       key: ValueKey('lupa-cargando'),
                       texto: 'Cargando el espejo…')
-                  : !buscando
+                  : _errorCarga && _clientes.isEmpty
+                      ? EstadoError(
+                          key: const ValueKey('lupa-error'),
+                          titulo: 'No se pudo leer el espejo',
+                          detalle: 'La búsqueda no tiene datos '
+                              'que consultar en este teléfono.',
+                          onReintentar: _cargar)
+                      : !buscando
                       ? _recientesVista()
                       : ListView(
                     key: const ValueKey('lupa-resultados'),
@@ -529,6 +559,21 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
     final funciones =
         recientesFuncionesLupa(_recientes, esDueno: _auth.isOwner);
     final porId = {for (final c in _clientes) '${c['id']}': c};
+    // 1.36 H-C1 (136-573): la cabecera RECENTES solo se
+    // pinta si queda algo VISIBLE tras el filtrado (rol e
+    // ids caducos); si todo se filtró, el vacío honesto.
+    final hayClientesVisibles = _recientes.any(
+        (r) => r.startsWith('cliente:') && porId[r.substring(8)] != null);
+    if (!hayClientesVisibles && funciones.isEmpty) {
+      return const EstadoVacio(
+        key: ValueKey('lupa-recientes'),
+        icono: Icons.history_rounded,
+        titulo: 'Sin recientes todavía',
+        subtitulo: 'Escribe un nombre (en cualquier orden, sin '
+            'tildes), los últimos 4 dígitos de un teléfono o el '
+            'nombre de una herramienta.',
+      );
+    }
     return ListView(
       key: const ValueKey('lupa-recientes'),
       children: [

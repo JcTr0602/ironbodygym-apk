@@ -492,6 +492,25 @@ List<Map<String, dynamic>> buscarClientesPanel(
     if (esVistaProtegida(c)) continue;
     final texto = normalizarTextoPanel(
         '${c['nombre'] ?? ''} ${c['telefono'] ?? ''}');
+    // 1.36 H-C1 (136-582): como la búsqueda principal —
+    // si la consulta ENTERA son dígitos (con espacios o
+    // guiones tecleados), se compara unida contra los
+    // DÍGITOS del teléfono, con el prefijo 53 resuelto
+    // por sufijo en ambos sentidos.
+    final telDigitos =
+        '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'\D'), '');
+    final qDigitos = q.replaceAll(RegExp(r'\D'), '');
+    final esConsultaTelefono = qDigitos.length >= 4 &&
+        q.replaceAll(RegExp(r'[\d\s-]'), '').isEmpty;
+    if (esConsultaTelefono) {
+      if (telDigitos.endsWith(qDigitos) ||
+          qDigitos.endsWith(telDigitos) ||
+          telDigitos.contains(qDigitos)) {
+        out.add(c);
+        if (out.length >= limite) break;
+      }
+      continue;
+    }
     if (tokens.every((t) => texto.contains(t))) {
       out.add(c);
       if (out.length >= limite) break;

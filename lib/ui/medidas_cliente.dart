@@ -123,12 +123,29 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
     // local recién hecho que esta tarjeta ya recargó).
     final nuevas = widget.medidasIniciales;
     if (nuevas != null &&
-        !identical(nuevas, oldWidget.medidasIniciales) &&
-        nuevas.length >= _medidas.length) {
-      setState(() {
-        _medidas = nuevas;
-        _cargando = false;
-      });
+        !identical(nuevas, oldWidget.medidasIniciales)) {
+      // 1.36 H-C1 (136-553): una lista MÁS CORTA se acepta
+      // cuando no es una foto vieja: si conserva la
+      // medición local más reciente (mismo id y mismo
+      // instante), lo que falta son filas BORRADAS y la
+      // foto es la vigente. La foto vieja —anterior al
+      // registro local recién hecho— no trae esa fila y
+      // se sigue descartando.
+      var aceptar = nuevas.length >= _medidas.length;
+      if (!aceptar && _medidas.isNotEmpty) {
+        final ultimaLocal = _medidas.first;
+        aceptar = nuevas.any((n) =>
+            '${n['medicion_id'] ?? ''}' ==
+                '${ultimaLocal['medicion_id'] ?? ''}' &&
+            '${n['creado_en'] ?? ''}' ==
+                '${ultimaLocal['creado_en'] ?? ''}');
+      }
+      if (aceptar) {
+        setState(() {
+          _medidas = nuevas;
+          _cargando = false;
+        });
+      }
     }
   }
 

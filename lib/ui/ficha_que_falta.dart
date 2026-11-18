@@ -64,7 +64,11 @@ List<PendienteFicha> pendientesDeFicha({
         DateTime.utc(hoy.year, hoy.month, hoy.day);
     final medUtc = DateTime.utc(ultimaMedicionEn.year,
         ultimaMedicionEn.month, ultimaMedicionEn.day);
-    if (hoyUtc.difference(medUtc).inDays > diasSinMedicion) {
+    // 1.36 H-C1 (136-537): la regla fijada es la de
+    // la propia etiqueta («Sin medición en 60 días»):
+    // el día 60 exacto YA cuenta como sin medición
+    // (>=, no >).
+    if (hoyUtc.difference(medUtc).inDays >= diasSinMedicion) {
       r.add(PendienteFicha.sinMedicionReciente);
     }
   }

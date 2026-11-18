@@ -106,6 +106,9 @@ class _SeccionFotosProgresoNubeState
   bool _cargando = true;
   bool _error = false;
   bool _errorSesion = false;
+  // 1.36 H-C1 (136-541): el aviso de sesión vencida en
+  // descargas sueltas se da una sola vez por sección.
+  bool _avisoSesionDado = false;
   List<Map<String, dynamic>> _fotos = const [];
 
   // 1.28 (M4-A13): descargas en vuelo por foto y caché de
@@ -250,6 +253,11 @@ class _SeccionFotosProgresoNubeState
           }),
         )
         .timeout(const Duration(seconds: 30));
+    // 1.36 H-C1 (136-541): 401/403 en la descarga suelta
+    // también es sesión vencida, no «foto rota».
+    if (r.statusCode == 401 || r.statusCode == 403) {
+      throw const _ErrorSesionFotos();
+    }
     if (r.statusCode != 200) return null;
     final tipo = r.headers['content-type'] ?? '';
     if (!tipo.startsWith('image/')) return null;
@@ -270,6 +278,11 @@ class _SeccionFotosProgresoNubeState
             }),
           )
           .timeout(const Duration(seconds: 12));
+      // 1.36 H-C1 (136-541): 401/403 al eliminar también
+      // es sesión vencida y se propaga como tal.
+      if (r.statusCode == 401 || r.statusCode == 403) {
+        throw const _ErrorSesionFotos();
+      }
       if (r.statusCode != 200) return false;
       final j = jsonDecode(r.body);
       return j is Map && j['ok'] == true;
@@ -361,8 +374,17 @@ class _SeccionFotosProgresoNubeState
         // proporción fija y estable (ver _celdaFoto).
       }
       return bytes;
-    } catch (_) {
+    } catch (e) {
       _falloEnMs[fotoId] = _reloj.elapsedMilliseconds;
+      // 1.36 H-C1 (136-541): la sesión vencida en una
+      // descarga individual se AVISA (una vez), no se
+      // degrada en silencio a miniatura rota.
+      if (e is _ErrorSesionFotos && mounted && !_avisoSesionDado) {
+        _avisoSesionDado = true;
+        mostrarSnack(context,
+            'La sesión venció. Vuelve a entrar para ver las fotos.',
+            significado: SignificadoChip.error);
+      }
       return null;
     } finally {
       _liberarDescarga();
@@ -449,6 +471,20 @@ class _SeccionFotosProgresoNubeState
     bool ok;
     try {
       ok = await (widget.eliminarFoto ?? _eliminarReal)(fotoId);
+    } on _ErrorSesionFotos {
+      // 1.36 H-C1 (136-541): sesión vencida al eliminar:
+      // se dice como tal, no como «no se eliminó».
+      ok = false;
+      _avisoSesionDado = true;
+      if (mounted) {
+        mostrarSnack(context,
+            'La sesión venció. Vuelve a entrar e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      }
+    } catch (_) {
+      // 1.36 H-C1 (136-542): ninguna excepción del loader
+      // escapa sin aviso: ok=false y el aviso de abajo.
+      ok = false;
     } finally {
       _eliminandoIds.remove(fotoId);
       if (mounted) setState(() {});
@@ -456,7 +492,7 @@ class _SeccionFotosProgresoNubeState
     if (!mounted) return ok;
     if (ok) {
       _borrarFotoLocal(fotoId);
-    } else {
+    } else if (!_avisoSesionDado) {
       mostrarSnack(
           context, 'El servidor no eliminó la foto. Inténtalo de nuevo.',
           significado: SignificadoChip.error);
@@ -884,7 +920,10 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
 
   Future<void> _pedirEliminar() async {
     if (_confirmando) return;
-    _confirmando = true;
+    // 1.36 H-C1 (136-548): el estado se PINTA (setState):
+    // el botón de eliminar se deshabilita mientras la
+    // confirmación está abierta.
+    setState(() => _confirmando = true);
     try {
       final fotoId = _foto['id']?.toString() ?? '';
       final ok = await showDialog<bool>(
@@ -911,7 +950,7 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
         Navigator.of(context).pop(fotoId);
       }
     } finally {
-      _confirmando = false;
+      if (mounted) setState(() => _confirmando = false);
     }
   }
 
@@ -997,7 +1036,7 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
             child: Row(
               children: [
                 TextButton.icon(
-                  onPressed: _pedirEliminar,
+                  onPressed: _confirmando ? null : _pedirEliminar,
                   icon: const Icon(Icons.delete_outline,
                       color: AppColores.error),
                   label: const Text('Eliminar de la nube',

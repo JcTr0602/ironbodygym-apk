@@ -91,11 +91,20 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   /// Clave de "Felicitado": incluye el año para caducar solo (Argón).
   String _claveFelicitado(int id) => 'felicitado_${_anio}_$id';
 
+  // 1.36 H-C1 (136-588): generación de carga — una
+  // respuesta vieja no pisa la lista más nueva.
+  int _cargaGen = 0;
+
   Future<void> _cargar() async {
     // Argón #10-4: _anio se fijaba solo en initState. Si la app
     // quedaba abierta de un año para otro y se refrescaba, las
     // claves de felicitado/regalo usaban el año viejo.
-    _anio = '${ahoraHabana().year}';
+    // 1.36 H-C1 (136-588): el año se FIJA al arrancar la
+    // carga y toda la carga usa ese año, no el del campo
+    // mutable a mitad de camino.
+    final gen = ++_cargaGen;
+    final anioFijado = '${ahoraHabana().year}';
+    _anio = anioFijado;
     setState(() {
       _cargando = true;
       _falloCarga = false;
@@ -120,12 +129,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       }
       // Regalos ya aplicados este año (verificación en BD, no en el
       // check local — regla crítica de Argón).
-      final regalados = <int>{};
-      for (final c in [...proximos, ...mes]) {
-        final id = (c['id'] as num?)?.toInt() ?? 0;
-        if (id <= 0) continue;
-        if (await _regaloAplicado(id)) regalados.add(id);
-      }
+      // 1.36 H-C1 (136-593): UNA sola pasada de consultas
+      // para todos los ids (antes, 2 consultas por cliente).
+      final ids = <int>{
+        for (final c in [...proximos, ...mes])
+          (c['id'] as num?)?.toInt() ?? 0,
+      }..removeWhere((i) => i <= 0);
+      final regalados = await _regaladosDelAnio(ids, anioFijado);
+      if (!mounted || gen != _cargaGen) return;
       if (mounted) {
         setState(() {
           _proximos = proximos;
@@ -136,13 +147,54 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && gen == _cargaGen) {
         setState(() {
           _cargando = false;
           _falloCarga = true;
         });
       }
     }
+  }
+
+  /// 1.36 H-C1 (136-593): los regalados del año para un
+  /// conjunto de clientes, con las MISMAS dos fuentes que
+  /// [_regaloAplicado] (meta anual + pagos de cortesía del
+  /// año que no sean canje de premios) pero en una sola
+  /// pasada de consultas.
+  Future<Set<int>> _regaladosDelAnio(
+      Set<int> ids, String anio) async {
+    final out = <int>{};
+    if (ids.isEmpty) return out;
+    try {
+      final d = await LocalDb.instance.db;
+      final claves = [for (final id in ids) 'regalo_cumple_${id}_$anio'];
+      final metas = await d.rawQuery(
+          'SELECT k FROM meta WHERE k IN '
+          '(${List.filled(claves.length, '?').join(',')})',
+          claves);
+      for (final m in metas) {
+        final k = '${m['k']}';
+        final id = int.tryParse(
+            k.substring('regalo_cumple_'.length, k.length - anio.length - 1));
+        if (id != null) out.add(id);
+      }
+      final filas = await d.rawQuery(
+          'SELECT cliente_id, data FROM pagos WHERE metodo = ? '
+          'AND fecha LIKE ? AND cliente_id IN '
+          '(${List.filled(ids.length, '?').join(',')})',
+          ['cortesia', '$anio%', ...ids]);
+      for (final f in filas) {
+        try {
+          final p = jsonDecode('${f['data']}') as Map<String, dynamic>;
+          if (p['periodo'] == 'personalizado') continue;
+        } catch (_) {
+          continue;
+        }
+        final id = (f['cliente_id'] as num?)?.toInt() ?? 0;
+        if (id > 0) out.add(id);
+      }
+    } catch (_) {}
+    return out;
   }
 
   /// ¿Ya se regaló el mes este año? Verifica la operación real en BD:
@@ -361,31 +413,50 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       }
       return;
     }
-    // a) Espejo local.
-    await LocalDb.instance.updateMirrorPagadoHasta(id, nuevoHasta);
-    // b) Op al servidor.
+    // 1.36 H-C1 (136-590): los cuatro pasos locales del
+    // regalo (espejo, op, procedencia y candado anual) van
+    // en UNA transacción local: un corte a mitad ya no
+    // deja el regalo a medias (antes, awaits sueltos).
     final opUuidRegalo = const Uuid().v4();
-    await LocalDb.instance.queueOp(
-      opUuid: opUuidRegalo,
-      tipo: 'regalar_mes_cumpleanos',
-      payload: {
-        'cliente_id': id,
-        'fecha': hoyHabanaIso(),
-      },
-    );
-    // b1) YS-5 (H5 de la revisión de Argón): el regalo pinta
-    // el vencimiento SIN ser un pago — sella SU op como
-    // autora del vencimiento vigente. Sin el sello, la
-    // procedencia quedaba con el uuid de un pago anterior
-    // (quizá ya muerto) y la guarda de identidad de la
-    // reversión decidía sobre ese dato podrido.
-    await LocalDb.instance
-        .registrarProcedenciaPago(id, opUuidRegalo);
-    // c) Meta local (candado anual).
-    await LocalDb.instance.setMeta(
-        'regalo_cumple_${id}_$_anio',
-        jsonEncode(
-            {'anterior': pagadoHastaActual, 'nuevo': nuevoHasta}));
+    try {
+      final d = await LocalDb.instance.db;
+      await d.transaction((txn) async {
+        // a) Espejo local.
+        await LocalDb.instance
+            .updateMirrorPagadoHasta(id, nuevoHasta, txn: txn);
+        // b) Op al servidor.
+        await LocalDb.instance.queueOp(
+          opUuid: opUuidRegalo,
+          tipo: 'regalar_mes_cumpleanos',
+          payload: {
+            'cliente_id': id,
+            'fecha': hoyHabanaIso(),
+          },
+          txn: txn,
+        );
+        // b1) YS-5 (H5 de la revisión de Argón): el regalo pinta
+        // el vencimiento SIN ser un pago — sella SU op como
+        // autora del vencimiento vigente. Sin el sello, la
+        // procedencia quedaba con el uuid de un pago anterior
+        // (quizá ya muerto) y la guarda de identidad de la
+        // reversión decidía sobre ese dato podrido.
+        await LocalDb.instance
+            .registrarProcedenciaPago(id, opUuidRegalo, txn: txn);
+        // c) Meta local (candado anual).
+        await LocalDb.instance.setMeta(
+            'regalo_cumple_${id}_$_anio',
+            jsonEncode(
+                {'anterior': pagadoHastaActual, 'nuevo': nuevoHasta}),
+            executor: txn);
+      });
+    } catch (_) {
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo aplicar el regalo. Inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     unawaited(SyncEngine.instance.push());
     if (mounted) {
       setState(() => _regaladosAnio.add(id));
@@ -460,7 +531,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     final id = (c['id'] as num?)?.toInt() ?? 0;
     final tel = await dialogoAgregarTelefono(context, clienteId: id);
     if (tel != null && mounted) {
-      setState(() => c['telefono'] = tel);
+      // 1.36 H-C1 (136-593): el teléfono EFECTIVO manda
+      // 'movil' primero (telefonoEfectivoWa): se reflejan
+      // AMBOS campos para que la tarjeta use el nuevo
+      // número ya, sin esperar a la recarga.
+      setState(() {
+        c['telefono'] = tel;
+        c['movil'] = tel;
+      });
     }
   }
 
@@ -681,7 +759,11 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                           ? AppColores.alerta
                           : AppColores.naranja,
                     ),
-                    onPressed: () => _regalarYFelicitar(c),
+                    // 1.36 H-C1 (136-593): ya regalado, el
+                    // botón se DESHABILITA (antes devolvía
+                    // solo un snack negativo al tocarlo).
+                    onPressed:
+                        regalado ? null : () => _regalarYFelicitar(c),
                   ),
               ],
             ),

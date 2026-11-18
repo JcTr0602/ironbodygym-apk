@@ -1,6 +1,8 @@
 /// Pantalla de acceso: diseño v1.1 (sistema de diseño centralizado).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -190,9 +192,12 @@ class _LoginScreenState extends State<LoginScreen>
       await _auth.signIn(u, p);
       // v1.2.2: descarga perfil (móvil/carnet) si lo local está vacío
       // (sobrevive reinstalaciones)
-      try {
-        await PerfilService.instance.descargarPerfilSiVacio();
-      } catch (_) {}
+      // 1.36 H-C1 (136-563): en SEGUNDO PLANO — con la red
+      // colgada, el await retenía la entrada hasta el
+      // timeout (12 s) antes de dejar pasar al usuario.
+      unawaited(PerfilService.instance
+          .descargarPerfilSiVacio()
+          .catchError((_) {}));
       // Guarda el usuario para la próxima vez
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('ultimo_usuario', u);

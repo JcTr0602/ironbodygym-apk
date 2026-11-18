@@ -216,6 +216,8 @@ Future<File?> elegirFotoEditada(
       origen,
       selector: selector,
       recuperador: recuperador,
+      flujoFoto: flujoFoto,
+      entidadIdFoto: entidadIdFoto,
     );
   } finally {
     _elegirFotoEnCurso = false;
@@ -284,7 +286,9 @@ Future<XFile?> elegirFotoSegura(
         AppLog.aviso('foto_elegir', 'datos_perdidos_con_error',
             d: '${perdida.exception}');
       }
-      if (perdida.file != null) {
+      if (perdida.file != null &&
+          await fotoRecuperadaEsDeEsteFlujo(
+              flujoFoto, entidadIdFoto)) {
         // 1.32 (H-B6-1): la foto recuperada se ANUNCIA —
         // antes volvía en silencio y el usuario veía una
         // foto «de la nada» en un flujo que acababa de
@@ -343,11 +347,33 @@ Future<XFile?> elegirFotoSegura(
   }
 }
 
+/// 1.36 H-C1 (136-549): ¿la foto recuperada pertenece a
+/// ESTE flujo/entidad? El contexto guardado al abrir el
+/// selector manda: si la petición interrumpida era de
+/// OTRO flujo u OTRA entidad, su foto no se cuela en
+/// este. Sin contexto o sin flujo declarado, no hay
+/// contra qué validar y se acepta (flujos legados).
+Future<bool> fotoRecuperadaEsDeEsteFlujo(
+    String? flujoFoto, String? entidadIdFoto) async {
+  if (flujoFoto == null) return true;
+  final ctx = await leerContextoFoto();
+  if (ctx == null) return true;
+  if (ctx.flujo != flujoFoto) return false;
+  if (ctx.entidadId != null &&
+      entidadIdFoto != null &&
+      ctx.entidadId != entidadIdFoto) {
+    return false;
+  }
+  return true;
+}
+
 Future<File?> _elegirFotoFlujo(
   BuildContext context,
   ImageSource origen, {
   SelectorFoto? selector,
   RecuperadorFotoPerdida? recuperador,
+  String? flujoFoto,
+  String? entidadIdFoto,
 }) async {
   File? destino;
   try {
@@ -367,10 +393,18 @@ Future<File?> _elegirFotoFlujo(
     // se anuncia al entregar el resultado (ver el aviso
     // tras el editor): que no entre «de la nada».
     var recuperada = false;
-    if (perdida.file != null) {
+    if (perdida.file != null &&
+        await fotoRecuperadaEsDeEsteFlujo(flujoFoto, entidadIdFoto)) {
       elegida = perdida.file;
       recuperada = true;
     } else {
+      if (perdida.file != null) {
+        // 1.36 H-C1 (136-549): la recuperada era de OTRO
+        // flujo/entidad: se descarta con registro y se
+        // sigue con una petición nueva.
+        AppLog.aviso('foto_elegir', 'foto_recuperada_otro_flujo',
+            d: 'flujo=$flujoFoto entidad=$entidadIdFoto');
+      }
       // 2) Petición nueva al selector.
       elegida = await (selector ?? _selectorReal)(origen);
     }
