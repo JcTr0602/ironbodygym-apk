@@ -25,8 +25,12 @@ class TurnosHubScreen extends StatelessWidget {
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Horario y turnos'),
-        body: const Center(
-          child: Text('Solo el dueño puede gestionar los turnos.'),
+        // 1.36 H-B1 (136-342): el gate se pinta con el
+        // estado vacío de la casa, no un Text centrado.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo el dueño',
+          subtitulo: 'Solo el dueño puede gestionar los turnos.',
         ),
       );
     }

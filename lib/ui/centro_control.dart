@@ -20,6 +20,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'actividad.dart';
+import 'primitivas.dart';
 import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'auditoria_silenciosa.dart';
@@ -67,6 +68,9 @@ class CentroControlScreen extends StatelessWidget {
           bottom: TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
+            // 1.36 H-B1 (136-324): cambiar de pestaña se
+            // siente, como en los segmentos de los pilares.
+            onTap: (_) => Tacto.seleccion(),
             tabs: [
               for (final p in pestanasCentroControl) Tab(text: p.titulo),
             ],

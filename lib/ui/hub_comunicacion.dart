@@ -121,8 +121,12 @@ class HubComunicacionScreen extends StatelessWidget {
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Comunicación'),
-        body: const Center(
-          child: Text('La comunicación es solo del dueño.'),
+        // 1.36 H-B1 (136-342): gate con el estado vacío
+        // de la casa.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo el dueño',
+          subtitulo: 'La comunicación es solo del dueño.',
         ),
       );
     }
@@ -146,7 +150,9 @@ class HubComunicacionScreen extends StatelessWidget {
               },
               child: Row(
                 children: [
-                  Icon(d.icono, color: AppColores.naranja, size: 26),
+                  // 1.36 H-B1 (136-343): patrón común de
+                  // enlace — insignia de módulo naranja.
+                  IconoModuloBadge.naranja(d.icono, tamanoIcono: 26),
                   const SizedBox(width: AppEspacio.md),
                   Expanded(
                     child: Column(

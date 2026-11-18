@@ -183,10 +183,18 @@ class _PilarClientesState extends State<PilarClientes> {
   int? _urgenciaVenc;
   StreamSubscription<SyncStatus>? _subSync;
 
+  /// 1.36 H-B1 (136-337): token de generación — solo el
+  /// conteo MÁS RECIENTE aplica su resultado; una lectura
+  /// lenta anterior no pisa la cifra fresca.
+  int _genUrgencia = 0;
+
   Future<void> _contarUrgencia() async {
+    final gen = ++_genUrgencia;
     try {
       final n = await conteoInsigniaVencimientos();
-      if (mounted) setState(() => _urgenciaVenc = n);
+      if (mounted && gen == _genUrgencia) {
+        setState(() => _urgenciaVenc = n);
+      }
     } catch (_) {
       // Sin lectura, sin insignia: el segmento no afirma
       // una cifra que no pudo comprobar.

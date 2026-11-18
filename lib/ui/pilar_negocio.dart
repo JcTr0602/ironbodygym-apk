@@ -349,25 +349,34 @@ class _PilarNegocioState extends State<PilarNegocio> {
                       label: Text(t.titulo)),
               ],
               selected: {_tab},
-              onSelectionChanged: (s) => setState(() {
-                _tab = s.first;
-                _visitados.add(s.first);
-              }),
+              // 1.36 H-B1 (136-324): mismo lenguaje que el
+              // pilar Clientes — tacto al elegir y fundido
+              // al cambiar de segmento.
+              onSelectionChanged: (s) {
+                Tacto.seleccion();
+                setState(() {
+                  _tab = s.first;
+                  _visitados.add(s.first);
+                });
+              },
             ),
           ),
         ),
         Expanded(
-          child: IndexedStack(
-            index: tabs.indexWhere((t) => t.id == _tab),
-            children: [
-              for (final t in tabs)
-                if (_visitados.contains(t.id))
-                  KeyedSubtree(
-                      key: ValueKey('pilar-negocio-${t.id}'),
-                      child: _vistaDe(t.id))
-                else
-                  const SizedBox.shrink(),
-            ],
+          child: FundidoAlCambiar(
+            indice: tabs.indexWhere((t) => t.id == _tab),
+            child: IndexedStack(
+              index: tabs.indexWhere((t) => t.id == _tab),
+              children: [
+                for (final t in tabs)
+                  if (_visitados.contains(t.id))
+                    KeyedSubtree(
+                        key: ValueKey('pilar-negocio-${t.id}'),
+                        child: _vistaDe(t.id))
+                  else
+                    const SizedBox.shrink(),
+              ],
+            ),
           ),
         ),
       ],
@@ -398,6 +407,9 @@ class _TabCajaState extends State<_TabCaja> {
   }
 
   Future<void> _cargar() async {
+    // 1.36 H-B1 (136-338): cada recarga se anuncia — el
+    // «Reintentar» no gira en silencio sobre la foto vieja.
+    if (mounted && !_cargando) setState(() => _cargando = true);
     try {
       final lista = await entrenadoresConPendiente();
       if (!mounted) return;
@@ -417,7 +429,17 @@ class _TabCajaState extends State<_TabCaja> {
 
   Future<void> _liquidar(Map<String, dynamic> e) async {
     final tid = (e['telegram_id'] as num?)?.toInt();
-    if (tid == null) return;
+    // 1.36 H-B1 (136-339): sin telegram_id no hay silencio —
+    // se dice por qué no se puede liquidar.
+    if (tid == null) {
+      mostrarSnackEnMessenger(
+        ScaffoldMessenger.of(context),
+        'Este entrenador no tiene cuenta de Telegram vinculada: '
+        'no se le puede liquidar desde aquí.',
+        significado: SignificadoChip.alerta,
+      );
+      return;
+    }
     final nombre = '${e['nombre'] ?? ''}';
     final messenger = ScaffoldMessenger.of(context);
     final r = await mostrarHojaLiquidarArqueo(context,
@@ -512,7 +534,11 @@ class _TabCajaState extends State<_TabCaja> {
                       child: FilledButton.icon(
                         key: ValueKey(
                             'liquidar-arqueo-${e['telegram_id']}'),
-                        onPressed: () => _liquidar(e),
+                        // 1.36 H-B1 (136-339): sin telegram_id
+                        // el botón nace deshabilitado.
+                        onPressed: e['telegram_id'] == null
+                            ? null
+                            : () => _liquidar(e),
                         icon: const Icon(
                             Icons.account_balance_wallet_rounded,
                             size: 19),

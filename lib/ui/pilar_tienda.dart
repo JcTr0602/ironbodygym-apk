@@ -25,6 +25,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'servicios.dart';
 import 'suplementos.dart';
 
@@ -48,39 +49,52 @@ class _PilarTiendaState extends State<PilarTienda> {
         Padding(
           padding: const EdgeInsets.fromLTRB(
               AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.sm),
-          child: SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                  value: 'servicios',
-                  icon: Icon(Icons.science_rounded),
-                  label: Text('Servicios')),
-              ButtonSegment(
-                  value: 'suplementos',
-                  icon: Icon(Icons.medication_rounded),
-                  label: Text('Suplementos')),
-            ],
-            selected: {_segmento},
-            onSelectionChanged: (s) => setState(() {
-              _segmento = s.first;
-              _visitados.add(s.first);
-            }),
+          // 1.36 H-B1 (136-341): con pista, como el pilar
+          // Negocio — el segmento fuera de pantalla se anuncia.
+          child: ScrollHorizontalConPista(
+            colorFondo: Theme.of(context).scaffoldBackgroundColor,
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                    value: 'servicios',
+                    icon: Icon(Icons.science_rounded),
+                    label: Text('Servicios')),
+                ButtonSegment(
+                    value: 'suplementos',
+                    icon: Icon(Icons.medication_rounded),
+                    label: Text('Suplementos')),
+              ],
+              selected: {_segmento},
+              // 1.36 H-B1 (136-324): tacto y fundido como en
+              // los demás pilares.
+              onSelectionChanged: (s) {
+                Tacto.seleccion();
+                setState(() {
+                  _segmento = s.first;
+                  _visitados.add(s.first);
+                });
+              },
+            ),
           ),
         ),
         Expanded(
-          child: IndexedStack(
-            index: segmentos.indexOf(_segmento),
-            children: [
-              for (final s in segmentos)
-                if (_visitados.contains(s))
-                  KeyedSubtree(
-                    key: ValueKey('pilar-tienda-$s'),
-                    child: s == 'servicios'
-                        ? const ServiciosScreen(embebida: true)
-                        : const SuplementosScreen(embebida: true),
-                  )
-                else
-                  const SizedBox.shrink(),
-            ],
+          child: FundidoAlCambiar(
+            indice: segmentos.indexOf(_segmento),
+            child: IndexedStack(
+              index: segmentos.indexOf(_segmento),
+              children: [
+                for (final s in segmentos)
+                  if (_visitados.contains(s))
+                    KeyedSubtree(
+                      key: ValueKey('pilar-tienda-$s'),
+                      child: s == 'servicios'
+                          ? const ServiciosScreen(embebida: true)
+                          : const SuplementosScreen(embebida: true),
+                    )
+                  else
+                    const SizedBox.shrink(),
+              ],
+            ),
           ),
         ),
       ],

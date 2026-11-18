@@ -12,6 +12,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
 import 'diseno.dart';
@@ -34,15 +35,22 @@ abstract final class Tacto {
   /// vez (perezosa) y queda en caché; el interruptor de
   /// Ajustes la fija al momento con [fijarHabilitado].
   static bool? _habilitado;
+  static bool _leyendo = false;
 
+  /// 1.36 H-B1 (136-349): mientras la preferencia guardada
+  /// no se ha LEÍDO, no se vibra — antes el provisional
+  /// «true» vibraba contra un ajuste de vibración apagada
+  /// si el primer tacto llegaba antes que la lectura.
   static bool get _on {
     final h = _habilitado;
     if (h != null) return h;
-    _habilitado = true; // provisional hasta que lea el ajuste
-    PerfilService.instance
-        .getVibracion()
-        .then((v) => _habilitado = v, onError: (_) {});
-    return true;
+    if (!_leyendo) {
+      _leyendo = true;
+      PerfilService.instance.getVibracion().then(
+          (v) => _habilitado = v,
+          onError: (_) => _habilitado = true);
+    }
+    return false;
   }
 
   static void fijarHabilitado(bool v) => _habilitado = v;
@@ -185,6 +193,14 @@ class PadNumerico extends StatelessWidget {
     Widget tecla(String t, {bool ancha = false}) {
       // Sin decimales, la tecla '.' queda apagada y muda.
       final apagada = t == '.' && !decimales;
+      // 1.36 H-B1 (136-352): las teclas de acción se nombran
+      // para el lector de pantalla (el glifo no se lee).
+      final etiquetaSem = switch (t) {
+        '⌫' => 'Borrar',
+        '.' => 'Punto decimal',
+        'C' => 'Limpiar',
+        _ => null,
+      };
       return Expanded(
         flex: ancha ? 2 : 1,
         child: Padding(
@@ -199,13 +215,18 @@ class PadNumerico extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Center(
-                  child: Text(t,
-                      style: AppTexto.conTabulares(AppTexto.subtitulo)
-                          .copyWith(
-                              color: apagada
-                                  ? AppColores.textoSecundario(context)
-                                      .withValues(alpha: 0.35)
-                                  : null)),
+                  child: Semantics(
+                    button: true,
+                    label: etiquetaSem,
+                    excludeSemantics: etiquetaSem != null,
+                    child: Text(t,
+                        style: AppTexto.conTabulares(AppTexto.subtitulo)
+                            .copyWith(
+                                color: apagada
+                                    ? AppColores.textoSecundario(context)
+                                        .withValues(alpha: 0.35)
+                                    : null)),
+                  ),
                 ),
               ),
             ),
@@ -252,9 +273,68 @@ class DeslizarConfirmar extends StatefulWidget {
   State<DeslizarConfirmar> createState() => _DeslizarConfirmarState();
 }
 
-class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
+class _DeslizarConfirmarState extends State<DeslizarConfirmar>
+    with SingleTickerProviderStateMixin {
   double _progreso = 0; // 0..1
   bool _confirmado = false;
+
+  /// 1.36 H-B1 (136-359): el retroceso y la llegada se
+  /// animan con el token corto de la casa, no saltan.
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.corta,
+  );
+  double _animDesde = 0;
+  double _animHasta = 0;
+  bool _confirmarAlLlegar = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim.addListener(() {
+      setState(() {
+        _progreso = _animDesde + (_animHasta - _animDesde) * _anim.value;
+      });
+    });
+    _anim.addStatusListener((s) {
+      if (s == AnimationStatus.completed && _confirmarAlLlegar) {
+        _confirmarAlLlegar = false;
+        _confirmar();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  void _animarA(double destino, {bool confirmar = false}) {
+    if (MediaQuery.of(context).disableAnimations) {
+      _progreso = destino;
+      if (confirmar) {
+        _confirmar();
+      } else {
+        setState(() {});
+      }
+      return;
+    }
+    _animDesde = _progreso;
+    _animHasta = destino;
+    _confirmarAlLlegar = confirmar;
+    _anim.forward(from: 0);
+  }
+
+  void _confirmar() {
+    if (_confirmado) return;
+    setState(() {
+      _progreso = 1;
+      _confirmado = true;
+    });
+    Tacto.confirmacion();
+    widget.onConfirmar();
+  }
 
   /// 1.32 (Corte B, H-CB-2 — Argón): si la hoja ABORTA tras
   /// la confirmación (la guarda de reverificación D2-04 de
@@ -271,6 +351,7 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
     super.didUpdateWidget(oldWidget);
     if ((!oldWidget.habilitado && widget.habilitado) ||
         oldWidget.texto != widget.texto) {
+      _anim.stop();
       _confirmado = false;
       _progreso = 0;
     }
@@ -283,7 +364,16 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
       builder: (context, cons) {
         final ancho = cons.maxWidth;
         final recorrido = (ancho - alto).clamp(1.0, double.infinity);
-        return Container(
+        // 1.36 H-B1 (136-355): quien no puede arrastrar
+        // (lector de pantalla) confirma con la acción
+        // semántica equivalente.
+        return Semantics(
+          customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+            const CustomSemanticsAction(label: 'Confirmar'): () {
+              if (widget.habilitado && !_confirmado) _confirmar();
+            },
+          },
+          child: Container(
           key: const ValueKey('deslizar-carril'),
           height: alto,
           decoration: BoxDecoration(
@@ -291,7 +381,12 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
                 ? AppColores.naranja.withValues(alpha: 0.16)
                 : Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(alto / 2),
-            border: Border.all(color: AppColores.naranja),
+            // 1.36 H-B1 (136-356): deshabilitado atenúa
+            // también el borde, no solo el fondo.
+            border: Border.all(
+                color: widget.habilitado
+                    ? AppColores.naranja
+                    : AppColores.naranja.withValues(alpha: 0.35)),
           ),
           child: Stack(
             children: [
@@ -313,23 +408,23 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
                 child: GestureDetector(
                   key: const ValueKey('deslizar-pulgar'),
                   onHorizontalDragUpdate: widget.habilitado && !_confirmado
-                      ? (d) => setState(() {
+                      ? (d) {
+                          _anim.stop();
+                          setState(() {
                             _progreso =
                                 (_progreso + d.delta.dx / recorrido)
                                     .clamp(0.0, 1.0);
-                          })
+                          });
+                        }
                       : null,
                   onHorizontalDragEnd: widget.habilitado && !_confirmado
                       ? (_) {
+                          // 1.36 H-B1 (136-359): llegada y
+                          // retroceso animados (token corto).
                           if (_progreso >= 0.92) {
-                            setState(() {
-                              _progreso = 1;
-                              _confirmado = true;
-                            });
-                            Tacto.confirmacion();
-                            widget.onConfirmar();
+                            _animarA(1, confirmar: true);
                           } else {
-                            setState(() => _progreso = 0);
+                            _animarA(0);
                           }
                         }
                       : null,
@@ -345,6 +440,7 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
                 ),
               ),
             ],
+          ),
           ),
         );
       },
@@ -456,8 +552,12 @@ class _HojaMontoPadState extends State<_HojaMontoPad> {
                 for (final r in widget.rapidos!)
                   ActionChip(
                     label: Text(r.etiqueta),
-                    onPressed: () =>
-                        setState(() => _valor = r.valor),
+                    // 1.36 H-B1 (136-324): elegir un importe
+                    // rápido se siente, como todo segmento/chip.
+                    onPressed: () {
+                      Tacto.seleccion();
+                      setState(() => _valor = r.valor);
+                    },
                   ),
               ],
             ),
@@ -515,9 +615,18 @@ class CampoMontoPad extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: InputDecorator(
+    // 1.36 H-B1 (136-360): tinta y semántica de botón, como
+    // el resto de campos tocables de la casa (antes era un
+    // GestureDetector mudo, sin ripple ni anuncio).
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadio.md),
+        child: Semantics(
+          button: true,
+          label: etiqueta,
+          child: InputDecorator(
         isEmpty: valor.isEmpty,
         decoration: InputDecoration(
           labelText: etiqueta,
@@ -538,11 +647,14 @@ class CampoMontoPad extends StatelessWidget {
         ),
         child: Text(
           valor.isEmpty ? 'Toca para escribir el importe' : valor,
-          style: AppTexto.cuerpo.copyWith(
-            fontFeatures: const [FontFeature.tabularFigures()],
-            color: valor.isEmpty
-                ? AppColores.textoSecundario(context)
-                : null,
+          // 1.36 H-B1 (136-361): con valor, el importe se
+          // pinta con la cifra de la casa (metrica tabular);
+          // el marcador vacío sigue en cuerpo secundario.
+          style: valor.isEmpty
+              ? AppTexto.cuerpo.copyWith(
+                  color: AppColores.textoSecundario(context))
+              : AppTexto.conTabulares(AppTexto.metrica),
+        ),
           ),
         ),
       ),
@@ -671,7 +783,7 @@ class _ScrollHorizontalConPistaState
     }
   }
 
-  Widget _degradado(bool haciaDerecha) {
+  Widget _degradado(bool haciaDerecha, bool visible) {
     return Positioned(
       top: 0,
       bottom: 0,
@@ -679,19 +791,24 @@ class _ScrollHorizontalConPistaState
       left: haciaDerecha ? null : 0,
       width: 28,
       child: IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: haciaDerecha
-                  ? Alignment.centerLeft
-                  : Alignment.centerRight,
-              end: haciaDerecha
-                  ? Alignment.centerRight
-                  : Alignment.centerLeft,
-              colors: [
-                widget.colorFondo.withValues(alpha: 0),
-                widget.colorFondo,
-              ],
+        // 1.36 H-B1 (136-362): la pista se funde, no salta.
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: AppMovimiento.corta,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: haciaDerecha
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                end: haciaDerecha
+                    ? Alignment.centerRight
+                    : Alignment.centerLeft,
+                colors: [
+                  widget.colorFondo.withValues(alpha: 0),
+                  widget.colorFondo,
+                ],
+              ),
             ),
           ),
         ),
@@ -711,9 +828,8 @@ class _ScrollHorizontalConPistaState
           scrollDirection: Axis.horizontal,
           child: widget.child,
         ),
-        if (_hayMasDerecha) _degradado(true),
-        if (widget.pistaIzquierda && _hayMasIzquierda)
-          _degradado(false),
+        _degradado(true, _hayMasDerecha),
+        _degradado(false, widget.pistaIzquierda && _hayMasIzquierda),
       ],
     );
   }
