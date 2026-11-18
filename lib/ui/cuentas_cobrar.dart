@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import '../cliente_protegido.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
-import '../tiempo.dart';
 import 'app_bar.dart';
 import 'buscar.dart';
 import 'componentes.dart';
