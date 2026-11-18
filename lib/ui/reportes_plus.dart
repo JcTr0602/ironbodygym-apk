@@ -17,6 +17,7 @@
 /// reintento, nunca una bandeja «vacía» falsa.
 library;
 
+import '../app_log.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -79,6 +80,25 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
       error = 'Sin conexión o error del servidor. '
           'Los reportes se consultan en vivo; inténtalo de nuevo.';
     }
+    // (1.36 H-B4 136-1038) la lectura de ops va DENTRO del
+    // try: si lanza, hay estado de error y la bandera baja
+    // (antes quedaba fuera y un throw dejaba la pantalla
+    // cargando para siempre, sin error).
+    List<Map<String, dynamic>> ops;
+    try {
+      ops = await LocalDb.instance.pendingOpsLectura();
+    } catch (e) {
+      AppLog.error('ui', 'reportes_plus_ops_fallo', d: '$e');
+      if (!mounted) return;
+      setState(() {
+        if (lista != null) _reportes = lista;
+        _error = error ??
+            'No se pudo leer el estado de los reportes en '
+                'este teléfono. Inténtalo de nuevo.';
+        _cargando = false;
+      });
+      return;
+    }
     // Yunque 3 (K5-2): lectura AMPLIA (pendingOpsLectura:
     // pendiente + enviada + error), no la del push — el gemelo
     // del arreglo de Reservas D-B2-02 (1.29) que aquí no se
@@ -87,7 +107,6 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
     // puente) la tarjeta se desbloqueaba y admitía la decisión
     // CONTRARIA sobre el mismo reporte, que luego rebotaba en
     // el servidor como REPORTE_YA_RESUELTO.
-    final ops = await LocalDb.instance.pendingOpsLectura();
     if (!mounted) return;
     setState(() {
       if (lista != null) _reportes = lista;

@@ -1,3 +1,4 @@
+import '../app_log.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -951,10 +952,21 @@ class _VerPerfilComunidadScreenState
 
   Future<void> _alternar() async {
     setState(() => _aplicando = true);
-    final ok = await widget.ocultar(!_oculto);
+    // (1.36 H-B4 136-969) el estado se libera SIEMPRE
+    // (finally) y un fallo de transporte también avisa:
+    // antes un throw dejaba el botón muerto en
+    // «Aplicando…» para siempre y sin decir nada.
+    bool ok;
+    try {
+      ok = await widget.ocultar(!_oculto);
+    } catch (e) {
+      AppLog.error('ui', 'comunidad_alternar_fallo', d: '$e');
+      ok = false;
+    } finally {
+      if (mounted) setState(() => _aplicando = false);
+    }
     if (!mounted) return;
     setState(() {
-      _aplicando = false;
       if (ok) _oculto = !_oculto;
     });
     // SL-10 G13-7: el aviso de la casa, no SnackBar crudo.

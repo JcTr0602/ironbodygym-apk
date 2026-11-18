@@ -189,7 +189,8 @@ class _SeccionActividadAppClientesState
       _sinConexion = false;
     });
     if (id == null) return;
-    final cache = await _servicio.leerCache(id);
+    final cache =
+        await _servicio.leerCache(id, rangoClave: _rango.name);
     if (!mounted || gen != _generacion) return;
     if (cache != null) {
       setState(() {
@@ -214,7 +215,8 @@ class _SeccionActividadAppClientesState
       ));
       if (!mounted || gen != _generacion) return;
       final ahora = ahoraUtcReal();
-      await _servicio.guardarCache(id, filas, ahora);
+      await _servicio.guardarCache(id, filas, ahora,
+          rangoClave: _rango.name);
       if (!mounted || gen != _generacion) return;
       setState(() {
         _filas = filas;

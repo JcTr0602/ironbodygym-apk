@@ -172,7 +172,11 @@ List<PerfilComunidadAdmin> filtrarPerfilesComunidad(
   final q = _sinAcentos(consulta.trim());
   if (q.isEmpty) return perfiles;
   return perfiles
-      .where((p) => _sinAcentos(p.nombre).contains(q))
+      // (1.36 H-B4 136-969) también por Nick: es como los
+      // clientes se conocen en el directorio.
+      .where((p) =>
+          _sinAcentos(p.nombre).contains(q) ||
+          (p.nick != null && _sinAcentos(p.nick!).contains(q)))
       .toList();
 }
 
@@ -461,7 +465,9 @@ class EventoModeracionComunidad {
       case 'reporte_descartado':
         return 'Reporte descartado';
       default:
-        return accion;
+        // (1.36 H-B4 136-969) ninguna acción se muestra
+        // con su clave cruda: texto humano genérico.
+        return 'Acción de moderación';
     }
   }
 }

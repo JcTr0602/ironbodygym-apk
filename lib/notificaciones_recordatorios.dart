@@ -27,6 +27,7 @@ library;
 
 import 'package:flutter/services.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'localdb.dart';
 import 'recordatorios.dart';
@@ -289,14 +290,22 @@ class AvisosRecordatorios {
         // recalculado aquí.
         final inst = instanteAvisoDebido(
             fecha: d.fechaHabana, ahoraUtc: ahoraUtcReal(), hora: hora);
-        await _canal.invokeMethod('programar', {
-          'id': clave,
-          'titulo': t.titulo,
-          'texto': t.texto,
-          'epochMillis': inst.millisecondsSinceEpoch,
-        });
-        await LocalDb.instance.setMeta(
-            clave, '${inst.millisecondsSinceEpoch}');
+        // (1.36 H-B4 136-986) cada programar va en su
+        // try/catch: un fallo con UN aviso no aborta el
+        // resto del barrido.
+        try {
+          await _canal.invokeMethod('programar', {
+            'id': clave,
+            'titulo': t.titulo,
+            'texto': t.texto,
+            'epochMillis': inst.millisecondsSinceEpoch,
+          });
+          await LocalDb.instance.setMeta(
+              clave, '${inst.millisecondsSinceEpoch}');
+        } catch (e) {
+          AppLog.error('notificaciones', 'programar_fallo',
+              d: 'clave=$clave $e');
+        }
       }
       // Cancelar los programados que ya no están vigentes
       // (desactivado, borrado, disparado desde otro lado, o de

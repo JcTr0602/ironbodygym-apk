@@ -651,6 +651,7 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
   late bool _vistaPrevia;
   DateTime? _desde;
   DateTime? _hasta;
+  bool _ventanaInvalida = false;
   final Set<int> _elegidos = {};
   List<({int id, String nombre})> _clientes = const [];
   bool _cargandoClientes = false;
@@ -669,6 +670,18 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
     _vistaPrevia = false;
     _desde = _habanaDeIso(a?.desde);
     _hasta = _habanaDeIso(a?.hasta);
+    // (1.36 H-B4 136-968) una ventana guardada con fecha
+    // NO válida no se pierde en silencio al abrir el
+    // editor (quedaría «sin ventana» y al guardar se
+    // publicaría así): se marca y guardar se bloquea
+    // hasta corregirla o quitarla.
+    _ventanaInvalida = (a?.desde != null && _desde == null) ||
+        (a?.hasta != null && _hasta == null);
+    if (_ventanaInvalida) {
+      _error = 'La ventana guardada tiene una fecha no '
+          'válida. Elige las fechas de nuevo o quítalas '
+          'antes de guardar.';
+    }
     if (a != null) _elegidos.addAll(a.clienteIds);
     if (_audiencia == 'especificos') _cargarClientes();
   }
@@ -722,6 +735,13 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
       } else {
         _hasta = valor;
       }
+      // (1.36 H-B4 136-968) corregida la fecha, se libera.
+      if (_ventanaInvalida &&
+          (widget.inicial?.desde == null || _desde != null) &&
+          (widget.inicial?.hasta == null || _hasta != null)) {
+        _ventanaInvalida = false;
+        _error = null;
+      }
     });
   }
 
@@ -735,7 +755,13 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
   Future<void> _enviar() async {
     final cuerpo = _cuerpoCtrl.text;
     String? error;
-    if (cuerpo.trim().isEmpty) {
+    if (_ventanaInvalida) {
+      // (1.36 H-B4 136-968) bloquea: no se publica sin
+      // ventana lo que la tenía inválida.
+      error = 'La ventana guardada tiene una fecha no '
+          'válida. Elige las fechas de nuevo o quítalas '
+          'antes de guardar.';
+    } else if (cuerpo.trim().isEmpty) {
       error = 'Escribe el texto del anuncio.';
     } else if (cuerpo.length > 4000) {
       error = 'El texto no puede pasar de 4000 caracteres.';
@@ -979,6 +1005,21 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
                       'quien lo había descartado.',
               style: AppTexto.secundario,
             ),
+            // (1.36 H-B4 136-968) salida explícita: quitar
+            // la ventana inválida y publicar sin ventana.
+            if (_ventanaInvalida)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() {
+                    _ventanaInvalida = false;
+                    _desde = null;
+                    _hasta = null;
+                    _error = null;
+                  }),
+                  child: const Text('Quitar la ventana inválida'),
+                ),
+              ),
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(_error!,

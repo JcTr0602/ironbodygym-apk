@@ -318,10 +318,16 @@ class _DetalleIncidenciaScreenState
                 null)
               _filaResponsable(inc),
             if (inc.fechaLimite != null)
+              // (1.36 H-B4 136-1011) la fecha límite CON año.
               _filaInfo('Límite',
-                  '${inc.fechaLimite!.day}/${inc.fechaLimite!.month}'),
-            _filaInfo('Abierta hace',
-                '${inc.diasAbierta} días'),
+                  '${inc.fechaLimite!.day}/${inc.fechaLimite!.month}/${inc.fechaLimite!.year}'),
+            // (1.36 H-B4 136-1011) sin fecha de creación
+            // fiable no se inventa un «0 días»: «Sin fecha».
+            _filaInfo(
+                'Abierta hace',
+                inc.creadaEn == null
+                    ? 'Sin fecha'
+                    : '${inc.diasAbierta} días'),
             if (inc.estaResuelta) ...[
               _filaInfo('Resuelta por',
                   inc.resueltaPor == null
@@ -347,7 +353,7 @@ class _DetalleIncidenciaScreenState
           SizedBox(
             width: 110,
             child: Text(label,
-                style: AppTexto.secundario.copyWith(color: Colors.grey[500])),
+                style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),
           ),
           Expanded(child: Text(valor)),
         ],
@@ -381,7 +387,7 @@ class _DetalleIncidenciaScreenState
           SizedBox(
             width: 110,
             child: Text('Responsable',
-                style: AppTexto.secundario.copyWith(color: Colors.grey[500])),
+                style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),
           ),
           Expanded(
             child: esCliente && clienteId != null
@@ -438,9 +444,9 @@ class _DetalleIncidenciaScreenState
         ),
         const SizedBox(height: 8),
         if (_fotos.isEmpty)
-          const Text('Sin fotos',
+          Text('Sin fotos',
               style: TextStyle(
-                  color: Colors.grey))
+                  color: AppColores.textoSecundario(context)))
         else
           Wrap(
             spacing: 8,

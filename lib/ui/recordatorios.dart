@@ -9,6 +9,7 @@
 ///   alcance no le ofrece «todos»); solo el dueño toca los de otros.
 library;
 
+import '../app_log.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -38,6 +39,8 @@ class RecordatoriosScreen extends StatefulWidget {
 
 class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   bool _cargando = true;
+  bool _falloCarga = false;
+  bool _empujePendiente = false;
   List<RecordatorioDebido> _debidos = [];
   List<Map<String, dynamic>> _configs = [];
 
@@ -108,6 +111,11 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
         }
       }
       final hora = await AvisosRecordatorios.horaAvisos();
+      // (1.36 H-B4 136-984) señal del último empuje tras
+      // mutar: si falló, la pantalla lo dice.
+      final empujeFallo = await LocalDb.instance
+              .getMeta(kMetaRecordatoriosPushFallo) ==
+          '1';
       if (mounted) {
         setState(() {
           _debidos = debidos;
@@ -116,11 +124,21 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
           _horaAvisos = hora;
           _sinPermisoNotif =
               permiso == 'denegado' || denegadoPersistente;
+          _empujePendiente = empujeFallo;
           _cargando = false;
+          _falloCarga = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // (1.36 H-B4 136-977) el fallo se VE con reintento;
+      // la lista vieja/vacía no se presenta como normal.
+      AppLog.error('ui', 'recordatorios_carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
+      }
     }
   }
 
@@ -417,9 +435,36 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando recordatorios…')
-          : ListView(
+          : _falloCarga
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los recordatorios',
+                  detalle: 'La lectura falló en este teléfono. '
+                      'Reinténtalo.',
+                  onReintentar: _cargar,
+                )
+              : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                if (_empujePendiente) ...[
+                  Tarjeta(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cloud_upload_rounded,
+                            color: AppColores.alerta),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Hay cambios de recordatorios '
+                            'pendientes de subir: se enviarán '
+                            'al sincronizar.',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 // 1.22 R-9: sin permiso, los avisos de las
                 // 08:00 nunca se ven: avisar aquí, donde se
                 // gestionan, con salto directo a Ajustes.

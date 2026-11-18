@@ -94,7 +94,13 @@ String? avisoFrescura({
         'Confirma si el cliente ya pagó en el turno antes de enviar';
   }
   final ts = DateTime.tryParse(ultimoPullIso);
-  if (ts == null) return null;
+  // (1.36 H-B4 136-974) un sello presente pero no
+  // parseable NO es «todo fresco»: es «sin registro
+  // válido», el mismo aviso que la ausencia de sello.
+  if (ts == null) {
+    return '⚠️ Sin registro válido de sincronización. '
+        'Confirma si el cliente ya pagó en el turno antes de enviar';
+  }
   // Yunque B (YB-CLI-06): `ahora` llega como ahoraHabana()
   // (hora de pared) y el sello parseado es un instante UTC:
   // se normaliza con aHabana antes de restar, como en hace(),

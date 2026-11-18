@@ -279,11 +279,26 @@ bool actividadVisibleParaEntrenador(
   );
 }
 
+/// (1.36 H-B4 136-995) el monto de una actividad: con las
+/// DOS monedas presentes se muestran las dos (antes el USD
+/// tapaba el CUP y el cobro parecía solo en dólares).
+String montoTxtActividad(double cup, double usd) {
+  if (cup > 0 && usd > 0) {
+    return '${fmtMonto(cup)} CUP + ${fmtMonto(usd)} USD';
+  }
+  if (usd > 0) return '${fmtMonto(usd)} USD';
+  if (cup > 0) return '${fmtMonto(cup)} CUP';
+  return '';
+}
+
 /// v1.3.7 (Fase 2, D2): calcula (texto, esPositiva) de la comparativa.
 /// Top-level para tests. Si previo <= 0 devuelve "—".
-(String, bool) textoComparativa(
+/// (1.36 H-B4 136-998) sin base previa la comparativa es
+/// NEUTRA: esPositiva viene null y la cinta la pinta en
+/// texto secundario, no en verde de éxito.
+(String, bool?) textoComparativa(
     double actual, double previo, String etiqueta) {
-  if (previo <= 0) return ('— vs $etiqueta', true);
+  if (previo <= 0) return ('— vs $etiqueta', null);
   final pct = (actual - previo) / previo * 100;
   final flecha = pct >= 0 ? '↑' : '↓';
   final signo = pct >= 0 ? '+' : '';
@@ -932,7 +947,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
   }
 
   List<Map<String, dynamic>> get _filtrados {
-    final q = _busqueda.trim().toLowerCase();
+    // (1.36 H-B4 136-991) la búsqueda normaliza con
+    // sinTildes().toLowerCase() la consulta Y los campos,
+    // como ya hacía el resaltado: «jose» encuentra «José».
+    final q = sinTildes(_busqueda.trim()).toLowerCase();
     return _items.where((a) {
       // v1.3.3: filtro por categoría (diseño Argón).
       if (_filtro != 'todo') {
@@ -986,9 +1004,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
       // v1.2.1: buscador por nombre de cliente o texto del detalle
       if (q.isNotEmpty) {        final id = _clienteIdDe(a);
         final nombre = id != null ? (_nombres[id] ?? '') : '';
-        final detalle = '${a['detalle'] ?? ''}'.toLowerCase();
-        final actor = '${a['actor'] ?? ''}'.toLowerCase();
-        if (!nombre.toLowerCase().contains(q) &&
+        final detalle =
+            sinTildes('${a['detalle'] ?? ''}').toLowerCase();
+        final actor = sinTildes('${a['actor'] ?? ''}').toLowerCase();
+        if (!sinTildes(nombre).toLowerCase().contains(q) &&
             !detalle.contains(q) &&
             !actor.contains(q)) {
           return false;
@@ -1078,9 +1097,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// v1.3.3: detalle legible para una op local en cola.
   String _detalleOpLocal(String tipo, Map<String, dynamic> payload,
       double cup, double usd) {
-    final montoTxt = usd > 0
-        ? '${fmtMonto(usd)} USD'
-        : (cup > 0 ? '${fmtMonto(cup)} CUP' : '');
+    final montoTxt = montoTxtActividad(cup, usd);
     switch (tipo) {
       case 'pago_mensual':
       case 'pago':
@@ -1299,9 +1316,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       cup = m.$1;
       usd = m.$2;
     }
-    final montoTxt = usd > 0
-        ? '${fmtMonto(usd)} USD'
-        : (cup > 0 ? '${fmtMonto(cup)} CUP' : '');
+    final montoTxt = montoTxtActividad(cup, usd);
     final telefono =
         cliId != null ? (_telefonos[cliId] ?? '') : '';
     final waNum = normalizarTelefonoWaMe(telefono);
@@ -1595,7 +1610,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
       if (dentro.contains('efectivo')) return 'Efectivo';
       if (dentro.contains('transferencia')) return 'Transferencia';
     }
-    if (det.contains('usd')) return 'USD';
+    // (1.36 H-B4 136-996) «USD» es una MONEDA, no un
+    // método: sin método explícito la línea se omite
+    // (antes el recibo decía «Método: USD»).
     return '';
   }
 
@@ -2204,9 +2221,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final tieneMonto =
         badgeCup > 0 ||
             badgeUsd > 0;
-    final montoTxt = badgeUsd > 0
-        ? '+${fmtMonto(badgeUsd)} USD'
-        : '+${fmtMonto(badgeCup)} CUP';
+    // (1.36 H-B4 136-995) con las dos monedas, la tarjeta
+    // muestra las dos.
+    final montoTxt = (badgeCup > 0 && badgeUsd > 0)
+        ? '+${fmtMonto(badgeCup)} CUP + ${fmtMonto(badgeUsd)} USD'
+        : badgeUsd > 0
+            ? '+${fmtMonto(badgeUsd)} USD'
+            : '+${fmtMonto(badgeCup)} CUP';
     // v1.3.5 (Fase 1, C4): lookup O(1).
     final pendiente =
         _pendienteSync(a);
@@ -2486,7 +2507,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   /// v1.3.7 (Fase 2, D2): texto de comparativa vs período anterior.
   /// Usa la función top-level [textoComparativa] (testeable).
-  (String, bool)? _comparativa(
+  (String, bool?)? _comparativa(
       List<Map<String, dynamic>> filtrados, double totalCup) {
     final ant = _rangoAnterior();
     if (ant == null) return null;
@@ -2495,7 +2516,16 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final actualCup = totalCup +
         (_tasaUsd > 0 ? kpi.$3 * _tasaUsd : 0);
     final previo = _totalEnRango(_items, ant.$1, ant.$2);
-    final r = textoComparativa(actualCup, previo, ant.$3);
+    // (1.36 H-B4 136-997) el previo se calcula sobre TODOS
+    // los ítems del rango anterior, sin los filtros no
+    // temporales de la vista: si hay filtros activos, la
+    // comparativa se rotula «global» para no mentir.
+    final hayFiltros = _filtro != 'todo' ||
+        _filtroActor != 'todos' ||
+        _busqueda.trim().isNotEmpty ||
+        _filtroMonto != 'todo';
+    final r = textoComparativa(
+        actualCup, previo, hayFiltros ? '${ant.$3} (global)' : ant.$3);
     return r;
   }
 
@@ -2568,9 +2598,12 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     }
                     return Text(comp.$1,
                         style: AppTexto.etiqueta.copyWith(
-                            color: comp.$2
-                                ? AppColores.exito
-                                : AppColores.error));
+                            // (1.36 H-B4 136-998) null = neutra.
+                            color: comp.$2 == null
+                                ? AppColores.textoSecundario(ctx)
+                                : comp.$2!
+                                    ? AppColores.exito
+                                    : AppColores.error));
                   }),
                   if (desglose.isNotEmpty) ...[
                     const SizedBox(height: 2),

@@ -113,6 +113,10 @@ class CopiaAvisos {
 /// Lee la copia de anuncios. NUNCA lanza: cualquier
 /// fallo de preferencias degrada a «sin copia».
 Future<CopiaAnuncios?> leerCopiaAnuncios(int? telegramId) async {
+  // (1.36 H-B4 136-968) sin sesión (telegramId null) NO se
+  // lee copia: la clave compartida «_0» mezclaba la copia
+  // de una cuenta con la siguiente que abriera la app.
+  if (telegramId == null) return null;
   try {
     final prefs = await SharedPreferences.getInstance();
     return CopiaAnuncios.decodificar(
@@ -128,6 +132,8 @@ Future<CopiaAnuncios?> leerCopiaAnuncios(int? telegramId) async {
 /// pantalla.
 Future<void> guardarCopiaAnuncios(
     int? telegramId, Map<String, dynamic> json) async {
+  // (1.36 H-B4 136-968) sin sesión no se persiste copia.
+  if (telegramId == null) return;
   try {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -139,6 +145,9 @@ Future<void> guardarCopiaAnuncios(
 
 /// Lee la copia de avisos. NUNCA lanza.
 Future<CopiaAvisos?> leerCopiaAvisos(int? telegramId) async {
+  // (1.36 H-B4 136-968) sin sesión no se lee la copia
+  // compartida «_0».
+  if (telegramId == null) return null;
   try {
     final prefs = await SharedPreferences.getInstance();
     return CopiaAvisos.decodificar(
@@ -151,6 +160,8 @@ Future<CopiaAvisos?> leerCopiaAvisos(int? telegramId) async {
 /// Guarda la copia de avisos. NUNCA lanza.
 Future<void> guardarCopiaAvisos(
     int? telegramId, List<Map<String, dynamic>> filas) async {
+  // (1.36 H-B4 136-968) sin sesión no se persiste copia.
+  if (telegramId == null) return;
   try {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(

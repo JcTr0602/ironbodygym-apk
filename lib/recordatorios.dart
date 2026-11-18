@@ -20,6 +20,7 @@ import 'dart:async';
 
 import 'package:uuid/uuid.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'bloque2_resto.dart';
 import 'cliente_protegido.dart';
@@ -32,9 +33,20 @@ import 'tiempo.dart';
 /// pero nadie disparaba la subida — el cambio (y sobre todo el
 /// «ya disparado hoy» de los masivos) viajaba cuando otra
 /// acción sincronizaba. Empuje inmediato tras cada mutación.
+/// (1.36 H-B4 136-984) meta con el último empuje fallido:
+/// la pantalla de Recordatorios la lee y dice «pendiente
+/// de subir» en vez de confirmar en silencio.
+const String kMetaRecordatoriosPushFallo = 'recordatorios_push_fallo';
+
 void _empujarRecordatorios() {
-  unawaited(
-      SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  unawaited(SyncEngine.instance.push().then((r) async {
+    final fallo = !r.corrio || r.error != null;
+    await LocalDb.instance.setMeta(
+        kMetaRecordatoriosPushFallo, fallo ? '1' : '');
+  }, onError: (Object e) async {
+    AppLog.error('recordatorios', 'empuje_fallo', d: '$e');
+    await LocalDb.instance.setMeta(kMetaRecordatoriosPushFallo, '1');
+  }));
 }
 
 /// Un recordatorio vencido hoy, listo para disparar (o ya disparado).

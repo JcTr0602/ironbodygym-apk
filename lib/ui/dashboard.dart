@@ -4,6 +4,7 @@
 /// pendiente a entregar por entrenador.
 library;
 
+import '../app_log.dart';
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
@@ -66,6 +67,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _cargando = true;
+  bool _falloCarga = false;
   double _hoy = 0;
   double _semana = 0;
   double _mes = 0;
@@ -268,6 +270,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _atras30 = (cli[8] as List).length;
           }
           _cargando = false;
+          _falloCarga = false;
         });
       }
       // Campo 2026-11-02 (1.22): las novedades se aplican en
@@ -306,11 +309,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         });
       }
-    } catch (_) {
+    } catch (e) {
       // Un fallo de lectura no debe dejar el spinner eterno ni
       // borrar lo ya mostrado: se conserva el estado anterior.
+      // (1.36 H-B4 136-1027) y se DICE: banner de error con
+      // reintento (antes el panel quedaba en ceros mudos si
+      // era la primera carga).
+      AppLog.error('ui', 'dashboard_carga_fallo', d: '$e');
       if (mounted && v == _versionCarga) {
-        setState(() => _cargando = false);
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
       }
     }
   }
@@ -733,6 +743,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: AppEspacio.sm),
+                  // (1.36 H-B4 136-1027) la última carga
+                  // falló: las cifras pueden estar viejas.
+                  if (_falloCarga) ...[
+                    Tarjeta(
+                      child: Row(
+                        children: [
+                          Icon(Icons.cloud_off_rounded,
+                              color: AppColores.errorTexto(context)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'No se pudo actualizar el panel: '
+                              'se muestran los últimos datos '
+                              'cargados.',
+                              style: AppTexto.secundario,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => _cargar(),
+                            child: const Text('Reintentar'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppEspacio.sm),
+                  ],
                   // H5 (Argón): «Hoy en sala» también abre la vista
                   // sin candado, antes de las cifras.
                   if (_salaCargada) ...[

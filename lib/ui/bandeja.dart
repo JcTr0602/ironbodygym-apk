@@ -10,6 +10,7 @@
 /// la lista (fusión con ops pendientes) y se confirma al sincronizar.
 library;
 
+import '../app_log.dart';
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
@@ -97,6 +98,11 @@ class _BandejaScreenState extends State<BandejaScreen>
           _acceso = true;
           _errorCarga = true;
           _cargando = false;
+          // (1.36 H-B4 136-971) sin foto buena no quedan
+          // listas viejas ni conteos en el título.
+          _solicitudes = [];
+          _borradores = [];
+          _entrenadores = [];
         });
       }
       return;
@@ -141,11 +147,18 @@ class _BandejaScreenState extends State<BandejaScreen>
     } catch (_) {
       // Panel Terra (media): error ≠ lista vacía. Un fallo de
       // lectura no se presenta como «Sin solicitudes».
+      // (1.36 H-B4 136-971) y las listas se LIMPIAN: los
+      // conteos/badge no sobreviven a una carga fallida.
       if (mounted) {
         setState(() {
           _acceso = true;
           _errorCarga = true;
           _cargando = false;
+          _solicitudes = [];
+          _borradores = [];
+          _entrenadores = [];
+          _clientes = {};
+          _nombresTid = {};
         });
       }
     }
@@ -154,6 +167,26 @@ class _BandejaScreenState extends State<BandejaScreen>
   void _snack(String texto) {
     if (!mounted) return;
     mostrarSnack(context, texto);
+  }
+
+  /// (1.36 H-B4 136-973) mutación de bandeja: si el
+  /// encolado falla, snack de ERROR y ninguna confirmación
+  /// (antes el throw quedaba sin aviso tras el diálogo).
+  Future<void> _mutar(
+      Future<void> Function() op, String textoOk) async {
+    try {
+      await op();
+    } catch (e) {
+      AppLog.error('ui', 'bandeja_mutacion_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo guardar el cambio. Inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
+    _snack(textoOk);
+    await _cargar();
   }
 
   // SL-X1 (G04-4): sin nombre en el espejo, el fallback es
@@ -191,9 +224,8 @@ class _BandejaScreenState extends State<BandejaScreen>
       ),
     );
     if (ok != true) return;
-    await descartarSolicitudBandeja('${s['id']}');
-    _snack('Se descartará al sincronizar.');
-    await _cargar();
+    await _mutar(() => descartarSolicitudBandeja('${s['id']}'),
+        'Se descartará al sincronizar.');
   }
 
   /// Dueño: abre el editor pre-llenado con el tema; al publicar, la
@@ -269,14 +301,14 @@ class _BandejaScreenState extends State<BandejaScreen>
       }
       return;
     }
-    await guardarBorradorBandeja(
-      slug: slug,
-      titulo: titulo,
-      texto: texto,
-      solicitudId: '${s['id']}',
-    );
-    _snack('Borrador guardado. Se subirá al sincronizar.');
-    await _cargar();
+    await _mutar(
+        () => guardarBorradorBandeja(
+              slug: slug,
+              titulo: titulo,
+              texto: texto,
+              solicitudId: '${s['id']}',
+            ),
+        'Borrador guardado. Se subirá al sincronizar.');
   }
 
   Future<void> _editarBorrador(Map<String, dynamic> b) async {
@@ -298,13 +330,13 @@ class _BandejaScreenState extends State<BandejaScreen>
       _snack('El borrador necesita un título.');
       return;
     }
-    await guardarBorradorBandeja(
-      slug: '${b['id']}',
-      titulo: titulo,
-      texto: texto,
-    );
-    _snack('Borrador actualizado. Se subirá al sincronizar.');
-    await _cargar();
+    await _mutar(
+        () => guardarBorradorBandeja(
+              slug: '${b['id']}',
+              titulo: titulo,
+              texto: texto,
+            ),
+        'Borrador actualizado. Se subirá al sincronizar.');
   }
 
   Future<void> _eliminarBorrador(Map<String, dynamic> b) async {
@@ -325,9 +357,8 @@ class _BandejaScreenState extends State<BandejaScreen>
       ),
     );
     if (ok != true) return;
-    await eliminarBorradorBandeja('${b['id']}');
-    _snack('Se eliminará al sincronizar.');
-    await _cargar();
+    await _mutar(() => eliminarBorradorBandeja('${b['id']}'),
+        'Se eliminará al sincronizar.');
   }
 
   Future<void> _abrirBorradorEnEditor(Map<String, dynamic> b) async {
@@ -362,12 +393,26 @@ class _BandejaScreenState extends State<BandejaScreen>
     await _cargar();
   }
 
-  Widget _vacio(String texto) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(AppEspacio.xl),
-          child: Text(texto, textAlign: TextAlign.center),
-        ),
-      );
+  /// (1.36 H-B4 136-972) vacío de la casa: EstadoVacio
+  /// dentro de RefrescoIron (también en vacío se puede
+  /// tirar para refrescar), no un Center con texto crudo.
+  Widget _vacio(String texto) {
+    final partes = texto.split('\n');
+    return RefrescoIron(
+      onRefresh: _cargar,
+      child: ListView(
+        padding: const EdgeInsets.all(AppEspacio.xl),
+        children: [
+          const SizedBox(height: 48),
+          EstadoVacio(
+            icono: Icons.inbox_rounded,
+            titulo: partes.first,
+            subtitulo: partes.length > 1 ? partes.sublist(1).join(' ') : null,
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _tarjetaSolicitud(Map<String, dynamic> s, String estado) {
     final tema = '${s['tema'] ?? ''}';

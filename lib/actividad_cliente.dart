@@ -290,12 +290,21 @@ class ActividadClienteService {
   /// Lee la caché de una persona (null si nunca se
   /// descargó). Una caché corrupta se trata como ausente,
   /// nunca como error que bloquee la pantalla.
-  Future<CacheActividadCliente?> leerCache(int clienteId) async {
+  Future<CacheActividadCliente?> leerCache(int clienteId,
+      {String? rangoClave}) async {
     final crudo = await _db.getMeta('$_prefijo$clienteId');
     if (crudo == null || crudo.isEmpty) return null;
     try {
       final dec = jsonDecode(crudo);
       if (dec is! Map) return null;
+      // (1.36 H-B4 136-1000) la foto lleva su rango: una
+      // foto de «todo» no se reutiliza para «esta semana»
+      // (la consulta filtra por rango y la foto vieja
+      // pintaba filas fuera del rango pedido).
+      if (rangoClave != null &&
+          '${dec['rango'] ?? ''}' != rangoClave) {
+        return null;
+      }
       final filasCrudas = dec['filas'];
       if (filasCrudas is! List) return null;
       return CacheActividadCliente(
@@ -321,7 +330,8 @@ class ActividadClienteService {
   /// almacén de metadatos: la foto y el índice quedan
   /// consistentes o no queda nada.
   Future<void> guardarCache(int clienteId,
-      List<ActividadCliente> filas, DateTime descargadoEnUtc) async {
+      List<ActividadCliente> filas, DateTime descargadoEnUtc,
+      {String? rangoClave}) async {
     final recorte = filas.length > maxFilasPorPersona
         ? filas.sublist(0, maxFilasPorPersona)
         : filas;
@@ -337,6 +347,8 @@ class ActividadClienteService {
     final queda = sobran > 0 ? orden.sublist(sobran) : orden;
     final valor = jsonEncode({
       'descargado_en': descargadoEnUtc.toUtc().toIso8601String(),
+      // (1.36 H-B4 136-1000) el rango de la foto.
+      'rango': rangoClave ?? '',
       'filas': [for (final f in recorte) f.aJson()],
     });
     await repo.guardarFoto(

@@ -313,6 +313,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   final Map<int, String> _nombres = {};
   // cliente_id -> foto_path local (caché)
   final Map<int, String?> _fotos = {};
+
+  /// (1.36 H-B4 136-1019) existencia de la foto PRECARGADA
+  /// en la carga (async), no existsSync por tarjeta en el
+  /// build.
+  final Set<int> _fotosExisten = {};
   // cliente_id de clientes protegidos (Ronda 17 M1-H2): de ellos
   // no se precarga nombre ni foto y _detalle no muestra datos.
   final Set<int> _protegidosIds = {};
@@ -458,6 +463,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                 miActor: _miActor, miTelegramId: _miTelegramId))
             .toList();
     _precargarNombres(visibles);
+    await _refrescarExistenciaFotos();
     _ops = [..._ops, ...visibles];
   }
 
@@ -466,6 +472,19 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     setState(() => _cargandoMas = true);
     await _cargarBloque();
     if (mounted) setState(() => _cargandoMas = false);
+  }
+
+  /// (1.36 H-B4 136-1019) verifica en disco (async) las
+  /// fotos precargadas que aún no se han comprobado.
+  Future<void> _refrescarExistenciaFotos() async {
+    for (final e in _fotos.entries) {
+      final ruta = e.value;
+      if (ruta == null || ruta.isEmpty) continue;
+      if (_fotosExisten.contains(e.key)) continue;
+      try {
+        if (await File(ruta).exists()) _fotosExisten.add(e.key);
+      } catch (_) {}
+    }
   }
 
   /// Precarga nombre/foto de los clientes que mencionan las
@@ -705,7 +724,9 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   Widget build(BuildContext context) {
     final hoy = hoyHabanaIso();
     // Ronda 17 M1-H1: un no-dueño solo ve «Solo mías».
-    final esDueno = AuthService().isOwner;
+    // (1.36 H-B4 136-1017) manda el _esDueno calculado en
+    // la carga, no una re-lectura de sesión en cada build.
+    final esDueno = _esDueno;
     final opsHoy = _ops.where((o) => _diaOp(o) == hoy).length;
     final pendientes =
         _ops.where((o) => '${o['estado']}' == 'pendiente').length;
@@ -1030,7 +1051,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         onAccion: _cargar,
       );
     }
-    final esDueno = AuthService().isOwner;
+    final esDueno = _esDueno;
     return EstadoVacio(
       icono: Icons.filter_alt_off_rounded,
       titulo: 'Nada con este filtro',
@@ -1067,9 +1088,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     final p = _payload(op);
     final cid = _clienteId(p, tipo);
     final fotoPath = cid != null ? _fotos[cid] : null;
-    final tieneFoto = fotoPath != null &&
-        fotoPath.isNotEmpty &&
-        File(fotoPath).existsSync();
+    // (1.36 H-B4 136-1019) existencia precargada en carga.
+    final tieneFoto = cid != null && _fotosExisten.contains(cid);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
@@ -1083,28 +1103,35 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         child: Material(
           type: MaterialType.transparency,
           child: ListTile(
-          leading: tieneFoto
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Image.file(
-                    File(fotoPath),
-                    width: 40,
-                    height: 40,
-                    // 1.32 (S-G3/Paso 0): decodificación
-                    // acotada al triple del destino (40 dp
-                    // × 3); solo cacheWidth (fijar también
-                    // la altura estira el bitmap).
-                    cacheWidth: 120,
-                    fit: BoxFit.cover,
+          // (1.36 H-B4 136-1019) el leading es SIEMPRE el
+          // actor (su inicial): la foto del cliente va como
+          // chip aparte a la derecha, no le roba el sitio.
+          leading: CircleAvatar(
+            child: Text(
+              usuario.isNotEmpty
+                  ? usuario[0].toUpperCase()
+                  : '?',
+            ),
+          ),
+          trailing: tieneFoto
+              ? Tooltip(
+                  message: 'Cliente',
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.file(
+                      File(fotoPath!),
+                      width: 32,
+                      height: 32,
+                      cacheWidth: 96,
+                      fit: BoxFit.cover,
+                      // Si el archivo desapareció tras la
+                      // precarga, el chip se retira solo.
+                      errorBuilder: (_, __, ___) =>
+                          const SizedBox.shrink(),
+                    ),
                   ),
                 )
-              : CircleAvatar(
-                  child: Text(
-                    usuario.isNotEmpty
-                        ? usuario[0].toUpperCase()
-                        : '?',
-                  ),
-                ),
+              : null,
           // v1.3.7: título en lenguaje humano, siempre con detalle.
           title: Text(_descripcionOp(tipo), style: AppTexto.subtitulo),
           subtitle: Column(
