@@ -56,6 +56,10 @@ class TarjetaMedidas extends StatefulWidget {
 class _TarjetaMedidasState extends State<TarjetaMedidas> {
   List<Map<String, dynamic>> _medidas = [];
   bool _cargando = true;
+  // 1.36 H-B2 (136-554): fallo de carga visible con reintento
+  // (antes un error de lectura dejaba la tarjeta en «sin
+  // medidas» o cargando para siempre).
+  bool _errorCarga = false;
   // 1.28 (M4-A12): registro en curso — dos toques abrían
   // dos diálogos y registraban la fila dos veces.
   bool _registrando = false;
@@ -129,12 +133,23 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
   }
 
   Future<void> _cargar() async {
-    final m = await medicionesClienteLocal(widget.clienteId);
-    if (mounted) {
-      setState(() {
-        _medidas = m;
-        _cargando = false;
-      });
+    // 1.36 H-B2 (136-554): try/catch con EstadoError+reintento.
+    try {
+      final m = await medicionesClienteLocal(widget.clienteId);
+      if (mounted) {
+        setState(() {
+          _medidas = m;
+          _cargando = false;
+          _errorCarga = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _errorCarga = true;
+        });
+      }
     }
   }
 
@@ -282,9 +297,22 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
             ],
           ),
           if (_cargando)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: AppEspacio.sm),
-              child: CircularProgressIndicator(strokeWidth: 2),
+            // 1.36 H-B2 (136-558): la carga se anuncia a
+            // accesibilidad con su nombre.
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
+              child: Semantics(
+                label: 'Cargando medidas',
+                child: const CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else if (_errorCarga && _medidas.isEmpty)
+            EstadoError(
+              titulo: 'No se pudieron cargar las medidas',
+              onReintentar: () {
+                setState(() => _cargando = true);
+                _cargar();
+              },
             )
           else if (_medidas.isEmpty)
             // Alcance FIJADO en B7 (bloque4_b7_estados):
@@ -316,33 +344,52 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
                     ),
                 ],
               ),
-              GraficoMetricaGestion(
-                titulo:
-                    'Evolución de ${nombreMetrica(_metricaVigente).toLowerCase()}',
-                unidad: kMetricasMedicion[_metricaVigente]?.unidad ??
-                    '',
-                puntos: [
-                  for (final p in _serieVigente())
-                    PuntoSerie(p.fecha, p.valor),
-                ],
+              // 1.36 H-B2 (136-557): el cambio de métrica
+              // cruza con fundido en vez de sustituir en seco.
+              AnimatedSwitcher(
+                duration:
+                    AppMovimiento.resuelta(context, AppMovimiento.corta),
+                child: GraficoMetricaGestion(
+                  key: ValueKey(_metricaVigente),
+                  titulo:
+                      'Evolución de ${nombreMetrica(_metricaVigente).toLowerCase()}',
+                  unidad: kMetricasMedicion[_metricaVigente]?.unidad ??
+                      '',
+                  puntos: [
+                    for (final p in _serieVigente())
+                      PuntoSerie(p.fecha, p.valor),
+                  ],
+                ),
               ),
             ],
             // Historial completo, solo a petición.
             // 136-210: por tramos de 40, no de golpe.
-            if (_verTodo) ...[
-              for (final m in _medidas.take(_topeVerTodo))
-                _filaHistorial(m),
-              if (_medidas.length > _topeVerTodo)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: () =>
-                        setState(() => _topeVerTodo += 40),
-                    child: Text(
-                        'Ver más mediciones (${_medidas.length - _topeVerTodo} restantes)'),
-                  ),
-                ),
-            ],
+            // 1.36 H-B2 (136-557): el despliegue se anima en
+            // altura (AnimatedSize) en vez de aparecer de golpe.
+            AnimatedSize(
+              duration:
+                  AppMovimiento.resuelta(context, AppMovimiento.corta),
+              alignment: Alignment.topCenter,
+              child: _verTodo
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final m in _medidas.take(_topeVerTodo))
+                          _filaHistorial(m),
+                        if (_medidas.length > _topeVerTodo)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () =>
+                                  setState(() => _topeVerTodo += 40),
+                              child: Text(
+                                  'Ver más mediciones (${_medidas.length - _topeVerTodo} restantes)'),
+                            ),
+                          ),
+                      ],
+                    )
+                  : const SizedBox.shrink(),
+            ),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -466,6 +513,9 @@ class _DialogoRegistrarMedidaState
   // Yunque R4-M6-3: error de rango DENTRO del diálogo (ver
   // _registrar).
   String? _errorRango;
+  // 1.36 H-B2 (136-556): error en línea cuando no hay ninguna
+  // medida válida: el diálogo NO se cierra.
+  String? _errorVacio;
 
   @override
   void dispose() {
@@ -490,6 +540,15 @@ class _DialogoRegistrarMedidaState
       } else {
         descartadas.add(nombreMetrica(e.key));
       }
+    }
+    // 1.36 H-B2 (136-556): sin ninguna medida válida el
+    // diálogo se queda abierto con el error en línea (antes
+    // se cerraba y el aviso llegaba tarde, fuera de contexto).
+    if (medidas.isEmpty) {
+      setState(() => _errorVacio = descartadas.isEmpty
+          ? 'Escribe al menos una medida.'
+          : 'Revisa ${descartadas.join(', ')}: el valor no es un número.');
+      return;
     }
     // Yunque R4-M6-3: el rango se valida AQUÍ, con el
     // diálogo abierto y lo tecleado intacto. Antes el
@@ -517,38 +576,46 @@ class _DialogoRegistrarMedidaState
     return DialogoApp(
       titulo: 'Registrar medida',
       iconoTitulo: Icons.straighten_rounded,
-      contenido: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            'Escribe al menos una medida. Las filas no se editan: '
-            'si te equivocas, registra otra fila corregida.',
-            style: AppTexto.secundario,
-          ),
-          const SizedBox(height: 8),
-          for (final e in kMetricasMedicion.entries)
-            TextField(
-              controller: _ctrls[e.key],
-              keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
-              onChanged: (_) {
-                if (_errorRango != null) {
-                  setState(() => _errorRango = null);
-                }
-              },
-              decoration: InputDecoration(
-                  labelText:
-                      '${e.key.replaceAll('_', ' ')} (${e.value.unidad})'),
+      // 1.36 H-B2 (136-555): contenido desplazable (con el
+      // teclado abierto las 7 métricas no caben) y etiquetas
+      // por nombreMetrica, como los chips de la tarjeta.
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Escribe al menos una medida. Las filas no se editan: '
+              'si te equivocas, registra otra fila corregida.',
+              style: AppTexto.secundario,
             ),
-          if (_errorRango != null) ...[
             const SizedBox(height: 8),
-            Text(
-              _errorRango!,
-              style: AppTexto.metadato.copyWith(
-                  color: AppColores.errorTexto(context)),
-            ),
+            for (final e in kMetricasMedicion.entries)
+              TextField(
+                controller: _ctrls[e.key],
+                keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true),
+                onChanged: (_) {
+                  if (_errorRango != null || _errorVacio != null) {
+                    setState(() {
+                      _errorRango = null;
+                      _errorVacio = null;
+                    });
+                  }
+                },
+                decoration: InputDecoration(
+                    labelText:
+                        '${nombreMetrica(e.key)} (${e.value.unidad})'),
+              ),
+            if (_errorRango != null || _errorVacio != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _errorRango ?? _errorVacio!,
+                style: AppTexto.metadato.copyWith(
+                    color: AppColores.errorTexto(context)),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
       acciones: [
         TextButton(

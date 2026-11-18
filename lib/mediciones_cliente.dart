@@ -195,9 +195,16 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
       'espejado': false,
     };
   }
+  // 1.36 H-B2 (136-559): el orden manda por el instante real
+  // de creación (creado_en); la fecha_medicion solo desempata
+  // (dos filas del mismo día se ordenaban antes por fecha
+  // plana y la «última» podía ser la más vieja del día).
   final lista = porId.values.toList()
-    ..sort((a, b) =>
-        '${b['fecha_medicion']}'.compareTo('${a['fecha_medicion']}'));
+    ..sort((a, b) {
+      final c = '${b['creado_en']}'.compareTo('${a['creado_en']}');
+      if (c != 0) return c;
+      return '${b['fecha_medicion']}'.compareTo('${a['fecha_medicion']}');
+    });
   return lista;
 }
 
@@ -215,12 +222,15 @@ Map<String, double> deltasUltimaMedicion(
   final r = <String, double>{};
   for (final e in ultima.entries) {
     final v = (e.value as num?)?.toDouble();
-    if (v == null) continue;
+    // 1.36 H-B2 (136-560): el mismo filtro de validez de
+    // serieMedicion (>0 y finito): un 0/NaN legado no genera
+    // delta ni sirve de anterior comparable.
+    if (v == null || v <= 0 || !v.isFinite) continue;
     for (var i = 1; i < mediciones.length; i++) {
       final m = mediciones[i]['medidas'];
       if (m is! Map) continue;
       final anterior = (m[e.key] as num?)?.toDouble();
-      if (anterior != null) {
+      if (anterior != null && anterior > 0 && anterior.isFinite) {
         r['${e.key}'] = v - anterior;
         break;
       }
@@ -262,7 +272,10 @@ List<({DateTime fecha, double valor})> serieMedicion(
   double? pesoDe(Map<String, dynamic> m) {
     final medidas = m['medidas'];
     if (medidas is Map) {
-      return (medidas['peso_kg'] as num?)?.toDouble();
+      final p = (medidas['peso_kg'] as num?)?.toDouble();
+      // 1.36 H-B2 (136-560): filtro de validez de serieMedicion.
+      if (p == null || p <= 0 || !p.isFinite) return null;
+      return p;
     }
     return null;
   }
