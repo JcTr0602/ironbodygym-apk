@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../bloque3.dart';
 import '../invitados.dart';
@@ -627,6 +628,15 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         partirLote(seleccionados, accion, locales: _locales);
     final aplicables = parte.aplicables;
     final excluidos = parte.excluidos;
+    // 136-700: con 0 destinatarios aplicables el diálogo
+    // de lote NO se abre (antes se abría vacío y el
+    // descarte era silencioso).
+    if (aplicables.isEmpty) {
+      mostrarSnack(context,
+          'Ninguno de los seleccionados admite esta acción.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final params = await showDialog<({int dias, String motivo})>(
       context: context,
       builder: (_) => _DialogoLote(
@@ -886,8 +896,16 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 ),
                 TextButton(
                   onPressed: () => setState(() {
-                    _seleccion.addAll(
-                        [for (final i in _listaVisible.take(50)) i.id]);
+                    // 136-700: el tope de 50 cuenta la
+                    // selección PREVIA (antes: 30 previos +
+                    // 50 cargados = 80).
+                    final hueco = 50 - _seleccion.length;
+                    if (hueco > 0) {
+                      _seleccion.addAll([
+                        for (final i in _listaVisible.take(hueco))
+                          i.id,
+                      ]);
+                    }
                   }),
                   child: const Text('Seleccionar los cargados'),
                 ),
@@ -949,10 +967,13 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
+            // 1.36 H-B2 (136-704): en pantallas estrechas la
+            // fila buscador/orden se APILA (el selector de
+            // 184 px dejaba el buscador ilegible).
+            child: LayoutBuilder(
+              builder: (ctxFila, cons) {
+                final estrecha = cons.maxWidth < 560;
+                final buscador = TextField(
                     controller: _busquedaCtrl,
                     decoration: const InputDecoration(
                       // F3-19: la búsqueda es sobre la página
@@ -962,18 +983,22 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
-                    onChanged: (v) => setState(() => _busqueda = v),
-                  ),
-                ),
-                const SizedBox(width: AppEspacio.sm),
+                    // 1.36 H-B2 (136-700): cambiar la
+                    // búsqueda limpia la selección (el
+                    // filtro ya lo hacía).
+                    onChanged: (v) => setState(() {
+                          _busqueda = v;
+                          _seleccion.clear();
+                        }),
+                );
                 // DIS-05 (corrección): el botón del SDK se
                 // medía por su contenido; el campo cerrado de
                 // la casa (InputDecorator) exige ancho finito
                 // dentro de un Row — se acota al ancho de su
                 // etiqueta más larga («Orden del servidor»)
                 // junto al buscador expandido.
-                SizedBox(
-                  width: 184,
+                final selector = SizedBox(
+                  width: estrecha ? double.infinity : 184,
                   child: SelectorIron<String>(
                     valor: _orden,
                     tituloPanel: 'Ordenar por',
@@ -986,8 +1011,26 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                     alCambiar: (v) =>
                         setState(() => _orden = v ?? 'servidor'),
                   ),
-                ),
-              ],
+                );
+                if (estrecha) {
+                  return Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.stretch,
+                    children: [
+                      buscador,
+                      const SizedBox(height: AppEspacio.sm),
+                      selector,
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: buscador),
+                    const SizedBox(width: AppEspacio.sm),
+                    selector,
+                  ],
+                );
+              },
             ),
           ),
         // v1.12.0 (C5): enlace a los reportes Plus por atender (solo
@@ -1590,9 +1633,17 @@ class _DialogoLoteState extends State<_DialogoLote> {
                   controller: _diasCtrl,
                   keyboardType: TextInputType.number,
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: 'Días personalizados (1–365, opcional)',
-                    border: OutlineInputBorder(),
+                    // 136-703: el rango se valida EN el campo
+                    // y el valor efectivo queda visible.
+                    errorText: _diasInvalido
+                        ? 'Entre 1 y 365 días'
+                        : null,
+                    helperText: _diasCtrl.text.trim().isEmpty
+                        ? null
+                        : 'Días efectivos: $_diasEfectivos',
+                    border: const OutlineInputBorder(),
                     isDense: true,
                   ),
                 ),
@@ -1625,6 +1676,9 @@ class _DialogoLoteState extends State<_DialogoLote> {
             const SizedBox(height: AppEspacio.sm),
             TextField(
               controller: _motivoCtrl,
+              // 136-703: sin onChanged el botón Confirmar no
+              // se enteraba de que el motivo ya existe.
+              onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 hintText: 'Nota corta (opcional)',
                 border: OutlineInputBorder(),
@@ -1965,9 +2019,17 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       _snack('El teléfono del invitado no es válido para WhatsApp.');
       return;
     }
-    final ok = await launchUrl(Uri.parse('https://wa.me/$num'),
-        mode: LaunchMode.externalApplication);
-    if (!ok) _snack('No se pudo abrir WhatsApp.');
+    // 1.36 H-B2 (136-701): el lanzamiento puede lanzar
+    // (plataforma) además de devolver false — con captura
+    // y snack, no excepción sin dueño.
+    try {
+      final ok = await launchUrl(Uri.parse('https://wa.me/$num'),
+          mode: LaunchMode.externalApplication);
+      if (!ok) _snack('No se pudo abrir WhatsApp.');
+    } catch (e) {
+      AppLog.error('invitados', 'whatsapp_fallo', d: '$e');
+      _snack('No se pudo abrir WhatsApp.');
+    }
   }
 
   Future<void> _atender() async {
@@ -2029,6 +2091,15 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         final local =
             await ConversionInvitadoStore().leer(widget.invitadoId);
         if (mounted) setState(() => _local = local);
+      } on InvitadoError catch (e) {
+        // 136-701: la rama offline no capturaba — el error
+        // de la preparación local escapaba sin snack.
+        _snack(e.mensaje);
+      } catch (e) {
+        AppLog.error('invitados', 'conversion_offline_fallo',
+            d: '$e');
+        _snack('No se pudo preparar la conversión sin '
+            'conexión.');
       } finally {
         if (mounted) setState(() => _actuando = false);
       }
@@ -2177,6 +2248,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       } else {
         _snack('Sincronización revisada');
       }
+    } catch (e) {
+      // 136-701: el push/verificación sin captura dejaba
+      // el fallo mudo (solo el finally limpiaba el estado).
+      AppLog.error('invitados', 'sincronizar_fallo', d: '$e');
+      _snack('No se pudo sincronizar ahora.');
     } finally {
       if (mounted) setState(() => _actuando = false);
     }
@@ -3532,6 +3608,13 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
       // aquí y en el aviso, y la sync lo reintenta sola.
       final quedan = await _svc.guardarInfoPublicaEnBloque(cambios);
       if (!mounted) return;
+      // 1.36 H-B2 (136-702): las claves APLICADAS se
+      // fusionan en _originales en el acto — sin esto, el
+      // estado «sin guardar» (y el aviso al salir) seguía
+      // contando como pendientes las que SÍ se guardaron.
+      for (final c in cambios.keys) {
+        if (!quedan.containsKey(c)) _originales[c] = cambios[c]!;
+      }
       setState(() => _pendientesInfo = quedan);
       if (quedan.isEmpty) {
         mostrarSnack(context, 'Información pública actualizada: la app de '
@@ -3752,6 +3835,7 @@ class _DialogoRechazarInvitadoState
       title: const Text('Rechazar solicitud'),
       content: TextField(
         controller: _motivoCtrl,
+        onChanged: (_) => setState(() {}),
         decoration: const InputDecoration(
           labelText: 'Motivo del rechazo',
           hintText: 'Ej.: cupo lleno este mes',
@@ -3765,8 +3849,12 @@ class _DialogoRechazarInvitadoState
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () =>
-              Navigator.of(context).pop(_motivoCtrl.text.trim()),
+          // 1.36 H-B2 (136-703): Rechazar queda
+          // deshabilitado hasta escribir el motivo.
+          onPressed: _motivoCtrl.text.trim().isEmpty
+              ? null
+              : () => Navigator.of(context)
+                  .pop(_motivoCtrl.text.trim()),
           child: const Text('Rechazar'),
         ),
       ],
