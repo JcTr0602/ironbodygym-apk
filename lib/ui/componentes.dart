@@ -2511,6 +2511,10 @@ class CampoTexto extends StatefulWidget {
   // monte su propio campo).
   final TextInputAction? accionTexto;
   final void Function(String)? onSubmitted;
+  // 1.36 H-B3 (136-843): tope de caracteres opcional (el
+  // PIN de Ajustes lo necesita para migrar a CampoTexto
+  // sin perder su tope de 4 dígitos).
+  final int? maxLength;
 
   const CampoTexto({
     super.key,
@@ -2528,6 +2532,7 @@ class CampoTexto extends StatefulWidget {
     this.formateadores,
     this.accionTexto,
     this.onSubmitted,
+    this.maxLength,
   });
 
   @override
@@ -2558,6 +2563,7 @@ class _CampoTextoState extends State<CampoTexto> {
       textInputAction: widget.accionTexto,
       onFieldSubmitted: widget.onSubmitted,
       maxLines: widget.maxLineas,
+      maxLength: widget.maxLength,
       style: AppTexto.cuerpo,
       // 1.36 (136-279): la decoración ÚNICA del kit — antes
       // CampoTexto duplicaba la receta literal a literal.

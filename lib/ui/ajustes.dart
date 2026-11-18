@@ -20,6 +20,7 @@ import '../acceso_bloqueo.dart';
 import '../auth.dart';
 import '../app_log.dart';
 import '../comprobantes.dart';
+import '../errores_sync.dart';
 import '../config.dart';
 import '../fotos_cola.dart';
 import '../fotos_foreground.dart';
@@ -85,10 +86,25 @@ const titulosPorSeccionAjustes = <String, List<String>>{
   ],
   'Acerca de': [
     'Versión',
+    // 1.36 H-B3 (136-835): la fila existe en la UI y el
+    // índice no la traía — buscar «novedades» no la
+    // encontraba.
+    'Novedades de mi versión',
     'Lo nuevo',
     'Reportar problema',
     'Restablecer ajustes',
   ],
+};
+
+/// 1.36 H-B3 (136-834): títulos del índice que en la UI
+/// solo se pintan para el dueño — para otro rol no
+/// cuentan como «la sección tiene algo que enseñar».
+const titulosSoloDuenoAjustes = <String>{
+  'Exportar respaldo',
+  'Limpiar caché de fotos',
+  'Resincronizar fotos de clientes',
+  'Resincronizar fotos de suplementos',
+  'Restablecer ajustes',
 };
 
 /// ¿El [titulo] de un ajuste coincide con la
@@ -104,10 +120,18 @@ bool coincideBusquedaAjuste(String titulo, String consulta) {
 
 /// ¿La [seccion] tiene algún ajuste visible con la
 /// [consulta]? Sin búsqueda, todas se enseñan.
-bool seccionVisibleAjustes(String seccion, String consulta) {
+/// 1.36 H-B3 (136-834): la visibilidad se calcula con el
+/// ROL — las filas solo-dueño (y la sección Diagnóstico
+/// entera) no hacen «visible» una sección para un
+/// entrenador: la búsqueda no promete secciones vacías.
+bool seccionVisibleAjustes(String seccion, String consulta,
+    {bool esDueno = true}) {
   if (normalizarTextoPanel(consulta).isEmpty) return true;
+  if (seccion == 'Diagnóstico' && !esDueno) return false;
   final titulos = titulosPorSeccionAjustes[seccion] ?? const <String>[];
-  return titulos.any((t) => coincideBusquedaAjuste(t, consulta));
+  return titulos.any((t) =>
+      (esDueno || !titulosSoloDuenoAjustes.contains(t)) &&
+      coincideBusquedaAjuste(t, consulta));
 }
 
 class AjustesScreen extends StatefulWidget {
@@ -151,6 +175,34 @@ class _AjustesScreenState extends State<AjustesScreen> {
   String _swipeIzq = 'ninguna';
   String? _espacioTexto;
   bool _buscandoUpdate = false;
+  // 1.36 H-B3 (136-844): operación larga de Datos/
+  // Diagnóstico en curso (clave de la fila): bloquea el
+  // resto y pinta el progreso en su fila.
+  String? _operandoDatos;
+
+  /// Envuelve una operación larga con la bandera de
+  /// ocupado: entra/sale con setState y la fila muestra
+  /// el spinner mientras tanto.
+  Future<void> _conOperacionDatos(
+      String clave, Future<void> Function() op) async {
+    if (_operandoDatos != null) return;
+    setState(() => _operandoDatos = clave);
+    try {
+      await op();
+    } finally {
+      if (mounted) setState(() => _operandoDatos = null);
+    }
+  }
+
+  bool get _datosOcupado => _operandoDatos != null;
+
+  Widget? _trailingOperacion(String clave) =>
+      _operandoDatos == clave
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2))
+          : null;
   // (Yunque R2-X1) la carga del perfil terminó (bien o
   // mal): sin esta marca, un fallo a mitad dejaba los
   // valores por defecto EN SILENCIO, indistinguibles de
@@ -198,7 +250,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _msg('La exención de batería ya está activa en este '
             'teléfono.');
       case ResultadoPedirExencion.error:
-        _msg('No se pudo abrir el ajuste de batería del '
+        _msgError('No se pudo abrir el ajuste de batería del '
             'sistema. Actívala a mano: Ajustes del teléfono, '
             'batería, aplicaciones sin restricción, Iron Body.');
       case ResultadoPedirExencion.pedida:
@@ -221,7 +273,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       AppLog.error('ui', 'carga_fallo', d: '$e');
       if (mounted) {
         setState(() => _cargaPerfilFallo = true);
-        _msg('No se pudo leer tu perfil completo; algunos '
+        _msgError('No se pudo leer tu perfil completo; algunos '
             'valores se ven por defecto. Vuelve a entrar '
             'para reintentar.');
       }
@@ -276,9 +328,37 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
   }
 
-  void _msg(String t) {
+  // 1.36 H-B3 (136-843): los avisos de FALLO llevan el
+  // significado de error de forma consistente (antes _msg
+  // pintaba todo igual, también los errores).
+  void _msg(String t, {bool error = false}) {
     if (!mounted) return;
-    mostrarSnack(context, t);
+    if (error) {
+      mostrarSnack(context, t, significado: SignificadoChip.error);
+    } else {
+      mostrarSnack(context, t);
+    }
+  }
+
+  void _msgError(String t) => _msg(t, error: true);
+
+  /// 1.36 H-B3 (136-837): envoltura de las ESCRITURAS de
+  /// ajustes (switches, selectores, deslizador, editores):
+  /// si la escritura lanza, hay snack amable y _cargar()
+  /// repone los valores persistidos — el control nunca se
+  /// queda pintando un valor que no se guardó.
+  Future<void> _escrituraAjuste(
+      Future<void> Function() escritura) async {
+    try {
+      await escritura();
+    } catch (e) {
+      AppLog.error('ajustes', 'escritura_fallo', d: '$e');
+      if (!mounted) return;
+      mostrarSnack(context,
+          'No se pudo guardar el ajuste: ${mensajeErrorAmable(e)}',
+          significado: SignificadoChip.error);
+      _cargar();
+    }
   }
 
   // ---------- Perfil ----------
@@ -588,7 +668,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await _auth.changePassword(datos.actual, datos.nueva);
       _msg('Contraseña cambiada');
     } catch (_) {
-      _msg('No se pudo cambiar: verifica tu contraseña actual');
+      _msgError('No se pudo cambiar: verifica tu contraseña actual');
     }
   }
 
@@ -681,7 +761,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     try {
       await _exportarRespaldoFlujo();
     } catch (e) {
-      if (mounted) _msg('No se pudo exportar: $e');
+      if (mounted) _msgError('No se pudo exportar: $e');
     }
   }
 
@@ -779,7 +859,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       final db = await LocalDb.instance.db;
       final chk = await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
       if (chk.isEmpty) {
-        _msg('No se pudo exportar: no se pudo vaciar la base. '
+        _msgError('No se pudo exportar: no se pudo vaciar la base. '
             'Inténtalo de nuevo en un momento.');
         return;
       }
@@ -789,7 +869,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       final checkpointed =
           (filaChk['checkpointed'] as num?)?.toInt() ?? -2;
       if (busy != 0 || log != checkpointed) {
-        _msg('No se pudo exportar: la base está en uso. '
+        _msgError('No se pudo exportar: la base está en uso. '
             'Inténtalo de nuevo en un momento.');
         return;
       }
@@ -805,13 +885,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
         try {
           await File(destino).delete();
         } catch (_) {}
-        _msg('No se pudo exportar: la copia tardó demasiado '
+        _msgError('No se pudo exportar: la copia tardó demasiado '
             'y se perdió el candado de sincronización. '
             'Inténtalo de nuevo.');
         return;
       }
     } catch (e) {
-      _msg('No se pudo exportar: $e');
+      _msgError('No se pudo exportar: $e');
       return;
     } finally {
       latidoCandado.cancel();
@@ -838,7 +918,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await Share.shareXFiles([XFile(path)],
           text: 'Bitácora Iron Body Gym');
     } catch (e) {
-      _msg('No se pudo exportar la bitácora: $e');
+      _msgError('No se pudo exportar la bitácora: $e');
     }
   }
 
@@ -865,7 +945,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         await AppLog.confirmarMarcaExportada(maxId);
       }
     } catch (e) {
-      _msg('No se pudo exportar la bitácora: $e');
+      _msgError('No se pudo exportar la bitácora: $e');
     }
   }
 
@@ -909,7 +989,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             '${r['total']} registros');
       }
     } catch (e) {
-      _msg('No se pudo completar: $e');
+      _msgError('No se pudo completar: $e');
     }
   }
 
@@ -948,7 +1028,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             '${r['total']} registros');
       }
     } catch (e) {
-      _msg('No se pudo reiniciar: $e');
+      _msgError('No se pudo reiniciar: $e');
     }
   }
 
@@ -981,7 +1061,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       );
       ruta = res?.files.single.path;
     } catch (e) {
-      if (mounted) _msg('No se pudo abrir el selector: $e');
+      if (mounted) _msgError('No se pudo abrir el selector: $e');
       return;
     }
     if (ruta == null || !mounted) return;
@@ -1231,6 +1311,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
         }
       }
       if (!mounted) return;
+      // 1.36 H-B3 (136-844): tras importar se RECARGA la
+      // pantalla desde la base nueva (los valores que se
+      // ven ya son los importados) antes de ofrecer el
+      // reinicio de la app.
+      _cargar();
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -1247,7 +1332,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         ),
       );
     } catch (e) {
-      if (mounted) _msg('No se pudo importar: $e');
+      if (mounted) _msgError('No se pudo importar: $e');
     }
   }
 
@@ -1300,7 +1385,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         ),
       );
     } catch (e) {
-      _msg('No se pudo calcular: $e');
+      _msgError('No se pudo calcular: $e');
     }
   }
 
@@ -1333,7 +1418,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await FotosColaService.instance.limpiarHuerfanos();
       _msg('Caché de fotos limpiado');
     } catch (e) {
-      _msg('No se pudo limpiar: $e');
+      _msgError('No se pudo limpiar: $e');
     }
   }
 
@@ -1437,6 +1522,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
         iconoTitulo: Icons.new_releases_rounded,
         contenido: SizedBox(
           width: double.maxFinite,
+          // 1.36 H-B3 (136-843): lista ACOTADA con scroll
+          // (antes un shrinkWrap sin límite crecía con todo
+          // el historial de versiones).
+          height: 420,
           child: ListView.builder(
             shrinkWrap: true,
             itemCount: novedades.length,
@@ -1509,9 +1598,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
           'https://wa.me/5358191577?text=${Uri.encodeComponent(texto)}');
       final ok = await launchUrl(url,
           mode: LaunchMode.externalApplication);
-      if (!ok) _msg('No se pudo abrir WhatsApp');
+      if (!ok) _msgError('No se pudo abrir WhatsApp');
     } catch (_) {
-      _msg('No se pudo abrir WhatsApp');
+      _msgError('No se pudo abrir WhatsApp');
     }
   }
 
@@ -1550,7 +1639,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
   Widget _seccion(String titulo) {
     // 1.25 T113: con búsqueda, la sección solo se
     // enseña si algún ajuste suyo coincide.
-    if (!seccionVisibleAjustes(titulo, _busquedaAjustes)) {
+    // 1.36 H-B3 (136-834): con el rol aplicado por fila.
+    if (!seccionVisibleAjustes(titulo, _busquedaAjustes,
+        esDueno: _auth.isOwner)) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -1574,8 +1665,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
     return ListTile(
       leading: Icon(icono, size: 24),
+      // 1.36 H-B3 (136-843): el título sale de AppTexto,
+      // no de un TextStyle ad hoc.
       title: Text(titulo,
-          style: TextStyle(
+          style: AppTexto.cuerpo.copyWith(
               color: colorTitulo,
               fontWeight: colorTitulo != null
                   ? FontWeight.bold
@@ -1601,7 +1694,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
     required String titulo,
     required T valor,
     required List<OpcionSelector<T>> opciones,
-    required ValueChanged<T?>? alCambiar,
+    // 1.36 H-B3 (136-837): Future para la envoltura con
+    // try/catch + reversión, como _switch.
+    required Future<void> Function(T?)? alCambiar,
     String? textoAyuda,
   }) {
     if (!coincideBusquedaAjuste(titulo, _busquedaAjustes)) {
@@ -1622,7 +1717,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
             child: SelectorIron<T>(
               valor: valor,
               opciones: opciones,
-              alCambiar: alCambiar,
+              alCambiar: alCambiar == null
+                  ? null
+                  : (v) => _escrituraAjuste(() => alCambiar(v)),
               etiqueta: titulo,
               textoAyuda: textoAyuda,
             ),
@@ -1637,7 +1734,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     required String titulo,
     String? subtitulo,
     required bool valor,
-    required ValueChanged<bool> onChanged,
+    // 1.36 H-B3 (136-837): la escritura llega como Future
+    // para envolverla en _escrituraAjuste (try/catch +
+    // reversión), no como un ValueChanged mudo.
+    required Future<void> Function(bool) onChanged,
   }) {
     // 1.25 T113: filtro del buscador de ajustes.
     if (!coincideBusquedaAjuste(titulo, _busquedaAjustes)) {
@@ -1651,7 +1751,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
               style: AppTexto.metadato)
           : null,
       value: valor,
-      onChanged: onChanged,
+      onChanged: (v) => _escrituraAjuste(() => onChanged(v)),
     );
   }
 
@@ -1719,15 +1819,15 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 if (_busquedaAjustes.isNotEmpty &&
                     !titulosPorSeccionAjustes.keys
-                        // Autoauditoría 1.25: Diagnóstico es
-                        // solo del dueño; para el resto no
-                        // cuenta como sección visible (un
-                        // entrenador que busca «bitácora»
-                        // debe ver el aviso, no una lista
-                        // vacía sin explicación).
-                        .where((sec) =>
-                            sec != 'Diagnóstico' || _auth.isOwner)
-                        .any((sec) => seccionVisibleAjustes(sec, _busquedaAjustes)))
+                        // 1.36 H-B3 (136-834): el rol por
+                        // fila vive DENTRO de
+                        // seccionVisibleAjustes (antes solo
+                        // se excluía Diagnóstico a mano y
+                        // las demás filas solo-dueño hacían
+                        // «visible» una sección vacía).
+                        .any((sec) => seccionVisibleAjustes(
+                            sec, _busquedaAjustes,
+                            esDueno: _auth.isOwner)))
                   const EstadoVacio(
                     icono: Icons.search_off_rounded,
                     titulo: 'Ningún ajuste coincide',
@@ -1858,8 +1958,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
                                 '${anuncioEscalaLetra(_tamanoLetra, _escalaSistema).porcentaje}%',
                             onChanged: (v) =>
                                 setState(() => _tamanoLetra = v),
-                            onChangeEnd: (v) =>
-                                ThemeController.setFontScale(v),
+                            // 1.36 H-B3 (136-837): la
+                            // escritura del deslizador también
+                            // va envuelta (fallo = aviso +
+                            // reversión vía _cargar).
+                            onChangeEnd: (v) => _escrituraAjuste(
+                                () => ThemeController.setFontScale(v)),
                           ),
                         ),
                       ],
@@ -2133,7 +2237,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Exportar respaldo',
                     subtitulo:
                         'Guarda la base de datos para compartirla',
-                    onTap: _exportarRespaldo,
+                    // 1.36 H-B3 (136-844): progreso y
+                    // bloqueo mientras una operación larga
+                    // de Datos corre.
+                    trailing: _trailingOperacion('exportar'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos(
+                            'exportar', _exportarRespaldo),
                   ),
                 // 1.23 (cierre F-7, regla de Jc 2026-11-04):
                 // importar NO es solo del dueño (exportar sí):
@@ -2145,7 +2256,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   titulo: 'Importar respaldo',
                   subtitulo:
                       'Restaura los datos desde un archivo',
-                  onTap: _importarRespaldo,
+                  trailing: _trailingOperacion('importar'),
+                  onTap: _datosOcupado
+                      ? null
+                      : () => _conOperacionDatos(
+                          'importar', _importarRespaldo),
                 ),
                 _opcion(
                   icono: Icons.storage_rounded,
@@ -2162,7 +2277,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Limpiar caché de fotos',
                     subtitulo:
                         'Libera espacio; se descargan al sincronizar',
-                    onTap: _limpiarCache,
+                    trailing: _trailingOperacion('limpiar'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos(
+                            'limpiar', _limpiarCache),
                   ),
                 // v1.2.3: resincronizar fotos (solo dueño) - implementado
                 if (AuthService().isOwner)
@@ -2171,7 +2290,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Resincronizar fotos de clientes',
                     subtitulo:
                         'Re-sube fotos que no se sincronizaron',
-                    onTap: () => _resincronizarFotos('clientes'),
+                    trailing:
+                        _trailingOperacion('resync_clientes'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos('resync_clientes',
+                            () => _resincronizarFotos('clientes')),
                   ),
                 if (AuthService().isOwner)
                   _opcion(
@@ -2179,7 +2303,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Resincronizar fotos de suplementos',
                     subtitulo:
                         'Re-sube fotos que no se sincronizaron',
-                    onTap: () => _resincronizarFotos('suplementos'),
+                    trailing:
+                        _trailingOperacion('resync_suplementos'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos(
+                            'resync_suplementos',
+                            () => _resincronizarFotos('suplementos')),
                   ),
                 // ----- DIAGNÓSTICO (solo dueño) -----
                 if (AuthService().isOwner) _seccion('Diagnóstico'),
@@ -2190,7 +2320,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Exportar bitácora',
                     subtitulo:
                         'Genera un archivo con el registro de la app',
-                    onTap: _exportarBitacora,
+                    trailing: _trailingOperacion('bitacora'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos('bitacora', _exportarBitacora),
                   ),
                 // 1.21 (Argón 121B): delta y reinicio de bitácora.
                 if (AuthService().isOwner)
@@ -2199,7 +2332,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Exportar novedades de la bitácora',
                     subtitulo:
                         'Solo lo nuevo desde la última exportación',
-                    onTap: _exportarNovedadesBitacora,
+                    trailing: _trailingOperacion('bitacora'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos('bitacora', _exportarNovedadesBitacora),
                   ),
                 if (AuthService().isOwner)
                   _opcion(
@@ -2207,7 +2343,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Exportar y reiniciar bitácora',
                     subtitulo:
                         'Comparte el archivo completo y empieza de cero',
-                    onTap: _exportarYReiniciarBitacora,
+                    trailing: _trailingOperacion('bitacora'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos('bitacora', _exportarYReiniciarBitacora),
                   ),
                 if (AuthService().isOwner)
                   _opcion(
@@ -2215,7 +2354,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     titulo: 'Reiniciar bitácora',
                     subtitulo:
                         'Borra el registro sin exportar (irreversible)',
-                    onTap: _reiniciarBitacora,
+                    trailing: _trailingOperacion('bitacora'),
+                    onTap: _datosOcupado
+                        ? null
+                        : () => _conOperacionDatos('bitacora', _reiniciarBitacora),
                   ),
 
                 // ----- ACERCA DE -----
@@ -2420,16 +2562,16 @@ class _DialogoEditarCampoAjustesState
     return DialogoApp(
       titulo: widget.titulo,
       iconoTitulo: Icons.edit_rounded,
-      contenido: TextField(
+      // 1.36 H-B3 (136-843): CampoTexto de la casa, no un
+      // TextField crudo con su propia decoración.
+      contenido: CampoTexto(
         controller: _ctrl,
-        keyboardType: TextInputType.number,
-        inputFormatters: [
+        etiqueta: widget.etiqueta,
+        teclado: TextInputType.number,
+        formateadores: [
           FilteringTextInputFormatter.digitsOnly,
         ],
-        decoration: InputDecoration(
-            labelText: widget.etiqueta,
-            border: const OutlineInputBorder(),
-            errorText: _error),
+        errorText: _error,
         onChanged: (_) {
           if (_error != null) setState(() => _error = null);
         },
@@ -2622,54 +2764,48 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
       contenido: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 1.36 H-B3 (136-843): los tres campos del PIN
+          // pasan a CampoTexto (con el maxLength nuevo de
+          // la primitiva: el tope de 4 dígitos se conserva).
           if (widget.tienePin)
-            TextField(
+            CampoTexto(
               controller: _c0,
-              keyboardType: TextInputType.number,
+              etiqueta: 'PIN actual',
+              teclado: TextInputType.number,
               maxLength: 4,
               // Yunque 3 (K7-4): ni pegando entran signos —
               // el PIN son solo dígitos, como el teclado de
               // desbloqueo.
-              inputFormatters: [
+              formateadores: [
                 FilteringTextInputFormatter.digitsOnly
               ],
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'PIN actual',
-                border: OutlineInputBorder(),
-              ),
+              obscure: true,
             ),
           if (widget.tienePin) const SizedBox(height: 8),
-          TextField(
+          CampoTexto(
             controller: _c1,
-            keyboardType: TextInputType.number,
+            etiqueta: 'PIN (4 dígitos)',
+            teclado: TextInputType.number,
             maxLength: 4,
             // Yunque 3 (K7-4): solo dígitos, como _c0.
-            inputFormatters: [
+            formateadores: [
               FilteringTextInputFormatter.digitsOnly
             ],
-            obscureText: true,
-            decoration: InputDecoration(
-              labelText: 'PIN (4 dígitos)',
-              border: const OutlineInputBorder(),
-              errorText: _errorPin1,
-            ),
+            obscure: true,
+            errorText: _errorPin1,
           ),
           const SizedBox(height: 8),
-          TextField(
+          CampoTexto(
             controller: _c2,
-            keyboardType: TextInputType.number,
+            etiqueta: 'Repite el PIN',
+            teclado: TextInputType.number,
             maxLength: 4,
             // Yunque 3 (K7-4): solo dígitos, como _c0.
-            inputFormatters: [
+            formateadores: [
               FilteringTextInputFormatter.digitsOnly
             ],
-            obscureText: true,
-            decoration: InputDecoration(
-              labelText: 'Repite el PIN',
-              border: const OutlineInputBorder(),
-              errorText: _errorPin2,
-            ),
+            obscure: true,
+            errorText: _errorPin2,
           ),
         ],
       ),

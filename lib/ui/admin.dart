@@ -1489,9 +1489,23 @@ class _AdminScreenState extends State<AdminScreen> {
   Future<void> _guardarMontosImpl() async {
     // 1.23 (B3 Paso 3a): parseo puro en config_precios_bancarios
     // (solo finitos y > 0; Infinity se colaba como precio).
-    final cambios = parsearCambiosMontos(_montos);
+    // 1.36 H-B3 (136-841): con los errores POR CLAVE — un
+    // importe inválido ya no se descarta en silencio: se
+    // nombra su campo y no se guarda nada hasta corregirlo.
+    final parseo = parsearCambiosMontosConErrores(_montos);
+    if (parseo.errores.isNotEmpty) {
+      final detalle = parseo.errores.entries
+          .map((e) => '${etiquetaMonto(e.key)}: ${e.value}')
+          .join(' · ');
+      mostrarSnack(context, 'Revisa los precios: $detalle',
+          significado: SignificadoChip.error);
+      return;
+    }
+    final cambios = parseo.cambios;
     if (cambios.isEmpty) {
-      mostrarSnack(context, 'No hay montos válidos para guardar', significado: SignificadoChip.alerta);
+      // 1.36 H-B3 (136-841): el vacío NO borra — conserva
+      // el valor actual, y el aviso lo dice.
+      mostrarSnack(context, 'No hay montos válidos para guardar (un campo vacío conserva su valor actual)', significado: SignificadoChip.alerta);
       return;
     }
     // SL-9 (A1): la confirmación muestra las DIFERENCIAS

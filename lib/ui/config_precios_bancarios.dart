@@ -67,6 +67,31 @@ Map<String, double> parsearCambiosMontos(
   return cambios;
 }
 
+/// 1.36 H-B3 (136-841): la misma pasada pero devolviendo
+/// los errores POR CLAVE — antes lo inválido o no positivo
+/// se descartaba en silencio y el dueño creía haber
+/// corregido el precio. El campo VACÍO no es error:
+/// conserva el valor actual (y la pantalla lo dice).
+({Map<String, double> cambios, Map<String, String> errores})
+    parsearCambiosMontosConErrores(
+        Map<String, TextEditingController> montos) {
+  final cambios = <String, double>{};
+  final errores = <String, String>{};
+  for (final (clave, _) in clavesMontoConfig) {
+    final texto = (montos[clave]?.text ?? '').trim();
+    if (texto.isEmpty) continue;
+    final v = double.tryParse(texto.replaceAll(',', '.'));
+    if (v == null || !v.isFinite) {
+      errores[clave] = 'Escribe un importe válido';
+    } else if (v <= 0) {
+      errores[clave] = 'Debe ser mayor que 0';
+    } else {
+      cambios[clave] = v;
+    }
+  }
+  return (cambios: cambios, errores: errores);
+}
+
 /// Valida los datos bancarios contra los ajustes vigentes
 /// (v1.2.4, Hark): solo se envía lo que CAMBIÓ y no está vacío
 /// (vaciar un dato lo decide el servidor; la app no lo manda).
@@ -162,19 +187,25 @@ Future<void> aplicarCambiosMontos(Map<String, double> cambios) async {
 }
 
 /// Persiste los datos bancarios: una op `ajuste` por clave
-/// cambiada + espejo local (mismo orden que el guardado
-/// histórico de admin.dart).
+/// cambiada + espejo local.
+/// 1.36 H-B3 (136-842): en UNA transacción, como su
+/// hermana aplicarCambiosMontos — antes un fallo a mitad
+/// dejaba ops sin espejo o espejo sin ops.
 Future<void> aplicarCambiosBancarios(
     Map<String, String> cambios, Map<String, dynamic> ajustes) async {
   for (final e in cambios.entries) {
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'ajuste',
-      payload: {'clave': e.key, 'valor': e.value},
-    );
-  }
-  for (final e in cambios.entries) {
     ajustes[e.key] = e.value;
   }
-  await LocalDb.instance.setAjustes(ajustes);
+  final conn = await LocalDb.instance.db;
+  await conn.transaction((txn) async {
+    for (final e in cambios.entries) {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'ajuste',
+        payload: {'clave': e.key, 'valor': e.value},
+        txn: txn,
+      );
+    }
+    await LocalDb.instance.setAjustes(ajustes, executor: txn);
+  });
 }

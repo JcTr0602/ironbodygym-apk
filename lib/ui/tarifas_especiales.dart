@@ -24,6 +24,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 /// D1: todas las tarifas en una pantalla (estándar + especiales).
 class TarifasScreen extends StatefulWidget {
@@ -299,10 +300,13 @@ Future<bool> mostrarModalTarifaEspecial(
 }
 
 Future<List<int>?> _elegirClientes(BuildContext context) async {
-  final todos = await listaClientes('');
+  // 1.36 H-B3 (136-845): el diálogo se abre AL MOMENTO y
+  // carga la lista dentro (con su EstadoCargando) — antes
+  // se esperaba la lista antes de abrir y el toque
+  // parecía muerto.
   return showDialog<List<int>>(
     context: context,
-    builder: (ctx) => _DialogoElegirClientesTarifa(todos: todos),
+    builder: (ctx) => const _DialogoElegirClientesTarifa(),
   );
 }
 
@@ -311,8 +315,7 @@ Future<List<int>?> _elegirClientes(BuildContext context) async {
 /// controlador del filtro (antes se creaba en la función y
 /// nunca se liberaba). Devuelve los ids elegidos o null.
 class _DialogoElegirClientesTarifa extends StatefulWidget {
-  final List<Map<String, dynamic>> todos;
-  const _DialogoElegirClientesTarifa({required this.todos});
+  const _DialogoElegirClientesTarifa();
 
   @override
   State<_DialogoElegirClientesTarifa> createState() =>
@@ -323,6 +326,23 @@ class _DialogoElegirClientesTarifaState
     extends State<_DialogoElegirClientesTarifa> {
   final _filtro = TextEditingController();
   final _elegidos = <int>{};
+  // 1.36 H-B3 (136-845): la lista se carga DENTRO del
+  // diálogo ya abierto.
+  List<Map<String, dynamic>> _todos = const [];
+  bool _cargando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    () async {
+      final todos = await listaClientes('');
+      if (!mounted) return;
+      setState(() {
+        _todos = todos;
+        _cargando = false;
+      });
+    }();
+  }
 
   @override
   void dispose() {
@@ -334,8 +354,8 @@ class _DialogoElegirClientesTarifaState
   Widget build(BuildContext context) {
     final q = _filtro.text.trim().toLowerCase();
     final visibles = q.isEmpty
-        ? widget.todos
-        : widget.todos
+        ? _todos
+        : _todos
             .where((c) =>
                 '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
             .toList();
@@ -356,26 +376,47 @@ class _DialogoElegirClientesTarifaState
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: ListView(
-                children: [
-                  for (final c in visibles)
-                    CheckboxListTile(
-                      dense: true,
-                      title: Text('${c['nombre'] ?? ''}'),
-                      value: _elegidos
-                          .contains((c['id'] as num?)?.toInt()),
-                      onChanged: (v) => setState(() {
-                        final id = (c['id'] as num?)?.toInt();
-                        if (id == null) return;
-                        if (v == true) {
-                          _elegidos.add(id);
-                        } else {
-                          _elegidos.remove(id);
-                        }
-                      }),
-                    ),
-                ],
-              ),
+              // 1.36 H-B3 (136-845/839): cargando con el
+              // componente de la casa; sin resultados con
+              // EstadoVacio; y las filas SIN id van
+              // deshabilitadas con su aviso (antes no se
+              // podían marcar y nadie decía por qué).
+              child: _cargando
+                  ? const EstadoCargando(texto: 'Cargando clientes…')
+                  : visibles.isEmpty
+                      ? const EstadoVacio(
+                          icono: Icons.search_off_rounded,
+                          titulo: 'Sin resultados para ese nombre.',
+                        )
+                      : ListView(
+                          children: [
+                            for (final c in visibles)
+                              CheckboxListTile(
+                                dense: true,
+                                title: Text('${c['nombre'] ?? ''}'),
+                                subtitle: (c['id'] as num?)?.toInt() ==
+                                        null
+                                    ? const Text(
+                                        'Sin identificador: no se puede marcar')
+                                    : null,
+                                value: _elegidos.contains(
+                                    (c['id'] as num?)?.toInt()),
+                                onChanged: (c['id'] as num?)?.toInt() ==
+                                        null
+                                    ? null
+                                    : (v) => setState(() {
+                                          final id = (c['id'] as num?)
+                                              ?.toInt();
+                                          if (id == null) return;
+                                          if (v == true) {
+                                            _elegidos.add(id);
+                                          } else {
+                                            _elegidos.remove(id);
+                                          }
+                                        }),
+                              ),
+                          ],
+                        ),
             ),
           ],
         ),
@@ -495,18 +536,30 @@ Future<bool> _formularioTarifa(
     }
   }
 
-  await otorgarTarifaEspecialMulti(
-    clienteIds: clienteIds,
-    nombre: datos.nombre.trim(),
-    montoEfectivo: ef,
-    montoTransferencia: tr,
-    periodo: periodo,
-    vigenteDesde: datos.desde.trim(),
-    vigenteHasta:
-        datos.hasta.trim().isEmpty ? null : datos.hasta.trim(),
-    motivo: datos.motivo.trim(),
-    otorgadoPor: AuthService().telegramId,
-  );
+  // 1.36 H-B3 (136-840): otorgar va envuelto — si lanza,
+  // el dueño recibe el FALLO de una acción de dinero (no
+  // silencio) y no se anuncia éxito.
+  try {
+    await otorgarTarifaEspecialMulti(
+      clienteIds: clienteIds,
+      nombre: datos.nombre.trim(),
+      montoEfectivo: ef,
+      montoTransferencia: tr,
+      periodo: periodo,
+      vigenteDesde: datos.desde.trim(),
+      vigenteHasta:
+          datos.hasta.trim().isEmpty ? null : datos.hasta.trim(),
+      motivo: datos.motivo.trim(),
+      otorgadoPor: AuthService().telegramId,
+    );
+  } catch (e) {
+    AppLog.error('tarifas', 'otorgar_fallo', d: '$e');
+    if (!context.mounted) return false;
+    mostrarSnack(context,
+        'No se pudo guardar la tarifa: ${mensajeErrorAmable(e)}',
+        significado: SignificadoChip.error);
+    return false;
+  }
   // Como tras revocar: subir en cuanto se guarda.
   SyncEngine.instance.push();
   if (!context.mounted) return true;
@@ -548,6 +601,37 @@ String? errorValidacionTarifaEspecial({
   } else if (hasta.trim().isNotEmpty &&
       hasta.trim().compareTo(desde.trim()) < 0) {
     return 'Vigente hasta no puede ser antes que vigente desde.';
+  }
+  return null;
+}
+
+/// 1.36 H-B3 (136-839): el CAMPO culpable de la validación
+/// ('nombre' | 'montos' | 'motivo' | 'desde' | 'hasta'),
+/// con el mismo orden de chequeos que
+/// errorValidacionTarifaEspecial — el diálogo pinta el
+/// errorText en ese campo en vez de un texto suelto al
+/// final del formulario. PURO.
+String? campoErrorTarifaEspecial({
+  required String nombre,
+  required String efectivo,
+  required String transfer,
+  required String desde,
+  required String hasta,
+  required String motivo,
+}) {
+  final ef = _parseMonto(efectivo);
+  final tr = _parseMonto(transfer);
+  if (nombre.trim().isEmpty) return 'nombre';
+  if (ef == null && tr == null) return 'montos';
+  if ((ef != null && ef <= 0) || (tr != null && tr <= 0)) {
+    return 'montos';
+  }
+  if (motivo.trim().isEmpty) return 'motivo';
+  if (DateTime.tryParse(desde.trim()) == null) return 'desde';
+  if (hasta.trim().isNotEmpty &&
+      (DateTime.tryParse(hasta.trim()) == null ||
+          hasta.trim().compareTo(desde.trim()) < 0)) {
+    return 'hasta';
   }
   return null;
 }
@@ -663,6 +747,12 @@ class _DialogoFormularioTarifaState
   // SL-9 (G09-1): el error de validación se pinta DENTRO del
   // diálogo y el diálogo no se cierra hasta que valga.
   String? _error;
+  // 1.36 H-B3 (136-839): el campo culpable, para su
+  // errorText.
+  String? _campoError;
+  // 1.36 H-B3 (136-845): mientras la previa del periodo
+  // carga, los campos no se tocan (la previa sobrescribe).
+  bool _cargandoPrevia = false;
   var _periodo = 'mensual';
   Map<String, dynamic>? _activaPrevia;
 
@@ -687,6 +777,7 @@ class _DialogoFormularioTarifaState
   void _aplicarPrevia(Map<String, dynamic>? previa) {
     _activaPrevia = previa;
     _error = null;
+    _campoError = null;
     if (previa != null) {
       _nombreCtrl.text = '${previa['nombre'] ?? ''}';
       final ef = (previa['monto_efectivo'] as num?)?.toDouble();
@@ -715,10 +806,18 @@ class _DialogoFormularioTarifaState
     // Solo en modo un cliente: pre-carga AMBOS métodos de la fila
     // activa de ese periodo (ajuste 1).
     if (_esMulti) return;
-    final previa =
-        await tarifaActivaPara(widget.clienteIds.first, _periodo);
-    if (!mounted) return;
-    setState(() => _aplicarPrevia(previa));
+    // 1.36 H-B3 (136-845): durante la carga los campos
+    // quedan INERTES (IgnorePointer en el build): la
+    // previa no pisa a ciegas lo que se esté tecleando.
+    setState(() => _cargandoPrevia = true);
+    try {
+      final previa =
+          await tarifaActivaPara(widget.clienteIds.first, _periodo);
+      if (!mounted) return;
+      setState(() => _aplicarPrevia(previa));
+    } finally {
+      if (mounted) setState(() => _cargandoPrevia = false);
+    }
   }
 
   @override
@@ -729,9 +828,18 @@ class _DialogoFormularioTarifaState
           : 'Nueva tarifa especial',
       iconoTitulo: Icons.local_offer_rounded,
       contenido: SingleChildScrollView(
-        child: Column(
+        // 1.36 H-B3 (136-845): campos inertes mientras la
+        // previa del periodo carga.
+        child: IgnorePointer(
+          ignoring: _cargandoPrevia,
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_cargandoPrevia) ...[
+              const EstadoCargando(
+                  texto: 'Cargando la tarifa de este periodo…'),
+              const SizedBox(height: 8),
+            ],
             if (_esMulti)
               const Text(
                 'Se creará UNA fila por cliente. Lo que dejes vacío '
@@ -744,21 +852,26 @@ class _DialogoFormularioTarifaState
                   style: AppTexto.cuerpo),
             const SizedBox(height: 8),
             // N1 (estéticas 1.19): campos del sistema.
+            // 1.36 H-B3 (136-839): el error va POR CAMPO
+            // (errorText), no solo como texto al final.
             CampoTexto(
                 controller: _nombreCtrl,
-                etiqueta: 'Nombre (ej: Kevin 1000)'),
+                etiqueta: 'Nombre (ej: Kevin 1000)',
+                errorText: _campoError == 'nombre' ? _error : null),
             const SizedBox(height: 8),
             CampoTexto(
                 controller: _efectivoCtrl,
                 teclado: TextInputType.number,
                 etiqueta:
-                    'Monto en efectivo (vacío = sin especial)'),
+                    'Monto en efectivo (vacío = sin especial)',
+                errorText: _campoError == 'montos' ? _error : null),
             const SizedBox(height: 8),
             CampoTexto(
                 controller: _transferCtrl,
                 teclado: TextInputType.number,
                 etiqueta:
-                    'Monto por transferencia (vacío = sin especial)'),
+                    'Monto por transferencia (vacío = sin especial)',
+                errorText: _campoError == 'montos' ? _error : null),
             const SizedBox(height: 8),
             SelectorIronForm<String>(
               valorInicial: _periodo,
@@ -799,16 +912,23 @@ class _DialogoFormularioTarifaState
             CampoTexto(
                 controller: _motivoCtrl,
                 etiqueta: 'Motivo (obligatorio, interno: '
-                    'nunca sale en mensajes)'),
+                    'nunca sale en mensajes)',
+                errorText: _campoError == 'motivo' ? _error : null),
             // SL-9 (G09-1): el error de validación DENTRO del
             // diálogo, junto a los campos, sin cerrar nada.
-            if (_error != null) ...[
+            // (136-839: además va por campo vía errorText;
+            // este texto queda para los errores de FECHA,
+            // que no tienen campo de texto.)
+            if (_error != null &&
+                (_campoError == 'desde' || _campoError == 'hasta' ||
+                    _campoError == null)) ...[
               const SizedBox(height: 8),
               Text(_error!,
                   style: AppTexto.cuerpo
                       .copyWith(color: AppColores.error)),
             ],
           ],
+          ),
         ),
       ),
       acciones: [
@@ -871,7 +991,18 @@ class _DialogoFormularioTarifaState
                 motivo: datos.motivo,
               );
               if (error != null) {
-                setState(() => _error = error);
+                setState(() {
+                  _error = error;
+                  // 1.36 H-B3 (136-839): el campo culpable.
+                  _campoError = campoErrorTarifaEspecial(
+                    nombre: datos.nombre,
+                    efectivo: datos.efectivo,
+                    transfer: datos.transfer,
+                    desde: datos.desde,
+                    hasta: datos.hasta,
+                    motivo: datos.motivo,
+                  );
+                });
                 return;
               }
               Navigator.pop(context, datos);
