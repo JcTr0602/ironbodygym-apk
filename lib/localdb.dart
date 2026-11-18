@@ -11778,9 +11778,17 @@ class LocalDb {
   /// un fallo, es una espera ordenada por el dueño.
   Future<void> retenerOpPausada(String opUuid, String hastaIso) async {
     final d = await db;
+    // 1.36 (136-930): la retención SOLO toca ops en estados
+    // VIVOS ('pendiente', 'enviada', 'error' — el mismo
+    // conjunto que despertarOpsPausadas despierta). Sin el
+    // filtro, una retención TARDÍA (el servidor responde
+    // ACCESO_PAUSADO cuando la op ya se aplicó por otra vía,
+    // o la fila ya se archivó) resucitaba una op terminal a
+    // 'pendiente' y el push la reenviaba duplicada.
     await d.rawUpdate(
         'UPDATE ops_queue SET estado = ?, proximo_reintento = ? '
-        'WHERE op_uuid = ?',
+        'WHERE op_uuid = ? '
+        "AND estado IN ('pendiente', 'enviada', 'error')",
         ['pendiente', hastaIso, opUuid]);
   }
 
@@ -12247,11 +12255,21 @@ class LocalDb {
     final esAjena = userId == null
         ? '1=0'
         : '(user_id IS NOT NULL AND user_id != ?)';
+    // 1.36 (136-929): el predicado de autor de las ops en
+    // REVISIÓN es el de su lista (opsNecesitanRevision con
+    // userId): ESTRICTO (user_id = ?; las sin autor no se
+    // atribuyen a nadie). El conteo las sumaba con el
+    // predicado laxo de las pendientes (IS NULL OR =) y el
+    // resumen decía «N con problema» que la lista de
+    // revisión no enseñaba: conteo y lista discrepaban.
+    final esRevisionPropia =
+        userId == null ? '1=1' : 'user_id = ?';
     final args = <Object?>[
-      // Un userId por cada CASE con $esPropia/$esAjena, en el
-      // orden del SELECT: esperando, por_subir, con_error,
-      // ajenas (F-11 sumó el de «esperando»).
-      if (userId != null) ...[userId, userId, userId, userId],
+      // Un userId por cada CASE con predicado, en el orden
+      // del SELECT: esperando, por_subir, con_error (error
+      // laxo + revisión estricta), ajenas (F-11 sumó el de
+      // «esperando»).
+      if (userId != null) ...[userId, userId, userId, userId, userId],
     ];
     final r = await d.rawQuery(
         'SELECT '
@@ -12264,7 +12282,7 @@ class LocalDb {
         // 0 problemas con una op en revisión.
         "COALESCE(SUM(CASE WHEN estado = 'enviada' AND $esPropia THEN 1 ELSE 0 END), 0) AS esperando, "
         "COALESCE(SUM(CASE WHEN estado = 'pendiente' AND $esPropia THEN 1 ELSE 0 END), 0) AS por_subir, "
-        "COALESCE(SUM(CASE WHEN estado IN ('error', 'necesita_revision') AND $esPropia THEN 1 ELSE 0 END), 0) AS con_error, "
+        "COALESCE(SUM(CASE WHEN estado = 'error' AND $esPropia THEN 1 ELSE 0 END) + SUM(CASE WHEN estado = 'necesita_revision' AND $esRevisionPropia THEN 1 ELSE 0 END), 0) AS con_error, "
         "COALESCE(SUM(CASE WHEN estado IN ('pendiente', 'error') AND $esAjena THEN 1 ELSE 0 END), 0) AS ajenas "
         'FROM ops_queue',
         args);
@@ -13114,15 +13132,25 @@ class LocalDb {
   /// viejo no se enviaba hasta que este venciera, sin explicación.
   Future<void> reintentarOp(String opUuid) async {
     final d = await db;
+    // 1.36 (136-929): 'necesita_revision' entra en el conjunto
+    // reintentable — la UI la cuenta como fallo (countOpsFallidas,
+    // héroe de la Cola) y la pantalla ya la reintentaba con su
+    // propio SQL; la API de la BD era la única vía que la dejaba
+    // fuera, así que el mismo gesto dependía del camino. Se
+    // limpia también codigo_error, como hace la pantalla: el
+    // error guardado de la clasificación anterior no puede
+    // sobrevivir al reintento manual.
     await d.update(
         'ops_queue',
         {
           'estado': 'pendiente',
           'error': null,
+          'codigo_error': null,
           'proximo_reintento': null,
           'intentos': 0,
         },
-        where: "op_uuid=? AND estado IN ('error','rechazada')",
+        where: "op_uuid=? AND estado IN "
+            "('error','rechazada','necesita_revision')",
         whereArgs: [opUuid]);
   }
 
