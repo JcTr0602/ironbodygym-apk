@@ -893,6 +893,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   : (pomoVenta!['id'] as num).toInt(),
               'cliente_id': (cliente?['id'] as num?)?.toInt(),
               'casa': esCasaCliente,
+              // ARG136-12: el descriptor guarda también
+              // los roles de la venta, para que la
+              // repetición los conserve si algún día se
+              // escribe para una venta del dueño.
+              'vendedor_es_dueno': _esDueno && vendedorSel == _miTid,
+              'vendedor_id': _esDueno ? vendedorSel : null,
+              'responsable_efectivo_id': responsableForm,
             }),
           );
         } catch (_) {}
@@ -1531,6 +1538,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               'pomo_id': (pomoFinal['id'] as num).toInt(),
               'cliente_id': (cliente?['id'] as num?)?.toInt(),
               'casa': esCasa,
+              // ARG136-12: roles de la venta, como en el
+              // flujo simple.
+              'vendedor_es_dueno': _esDueno && vendedorSel == _miTid,
+              'vendedor_id': _esDueno ? vendedorSel : null,
+              'responsable_efectivo_id':
+                  _esDueno && !esCasa && metodo == 'efectivo'
+                      ? responsableSel
+                      : null,
             }),
           );
         } catch (_) {}

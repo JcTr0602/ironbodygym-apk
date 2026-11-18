@@ -1248,14 +1248,27 @@ Future<List<String>> repetirUltimaVentaServicio(
   final pomoId = (ultima['pomo_id'] as num?)?.toInt();
   final clienteId = (ultima['cliente_id'] as num?)?.toInt();
   final casa = ultima['casa'] == true;
+  // ARG136-12: los roles de la venta original viajan en el
+  // descriptor y se propagan: antes vendedorEsDueno iba
+  // fijo a false y vendedor/responsable se perdían (para
+  // las ventas de entrenador de hoy false/null ES lo
+  // correcto; un descriptor de venta del dueño repetía
+  // con comisión y sin atribución). Descriptor legado sin
+  // los campos = comportamiento de siempre.
+  final vendedorEsDueno = ultima['vendedor_es_dueno'] == true;
+  final vendedorId = (ultima['vendedor_id'] as num?)?.toInt();
+  final responsableEfectivoId =
+      (ultima['responsable_efectivo_id'] as num?)?.toInt();
   if ('${ultima['forma'] ?? 'simple'}' == 'multiple') {
     return registrarVentaMultipleServicio(
       pomoId: pomoId ?? 0,
       dosisN: (ultima['dosis_n'] as num?)?.toInt() ?? 1,
       pomosM: (ultima['pomos_m'] as num?)?.toInt() ?? 0,
       metodo: metodo,
-      vendedorEsDueno: false,
+      vendedorEsDueno: vendedorEsDueno,
       actorEsDueno: actorEsDueno,
+      vendedorId: vendedorId,
+      responsableEfectivoId: responsableEfectivoId,
       clienteId: clienteId,
       casa: casa,
       // El entrenador no ve los saldos (regla dura): su tope
@@ -1271,8 +1284,10 @@ Future<List<String>> repetirUltimaVentaServicio(
       pomoId: pomoId,
       cantidad: (ultima['cantidad'] as num?)?.toInt() ?? 1,
       metodo: metodo,
-      vendedorEsDueno: false,
+      vendedorEsDueno: vendedorEsDueno,
       actorEsDueno: actorEsDueno,
+      vendedorId: vendedorId,
+      responsableEfectivoId: responsableEfectivoId,
       clienteId: clienteId,
       casa: casa,
     ),
