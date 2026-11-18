@@ -786,7 +786,16 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
           .where((a) => ((a['dias_atraso'] as num?)?.toInt() ?? 0) <= 7)
           .toList();
       final viejos = items
-          .where((a) => ((a['dias_atraso'] as num?)?.toInt() ?? 0) > 7)
+          .where((a) {
+            final d = ((a['dias_atraso'] as num?)?.toInt() ?? 0);
+            return d > 7 && d <= 30;
+          })
+          .toList();
+      // 1.36 (136-238): la banda +30d entra en la Bandeja con
+      // subgrupo propio — el rótulo «8–30 días» no puede
+      // cubrir a los de 31+.
+      final graves = items
+          .where((a) => ((a['dias_atraso'] as num?)?.toInt() ?? 0) > 30)
           .toList();
       return [
         Padding(
@@ -817,6 +826,14 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                 style: TextStyle(fontWeight: FontWeight.w600)),
           ),
           for (final a in viejos) _tarjeta(a),
+        ],
+        if (graves.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(bottom: AppEspacio.xs, top: AppEspacio.xs),
+            child: Text('Hace más de 30 días',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          for (final a in graves) _tarjeta(a),
         ],
         const SizedBox(height: AppEspacio.sm),
       ];

@@ -25,8 +25,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../cliente_protegido.dart';
-import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import '../sync.dart';
@@ -58,19 +56,16 @@ class PilarClientes extends StatefulWidget {
 /// atrasados / avisadosVigentesConFecha) y con su mismo
 /// filtro de protegidos: la insignia nunca promete un
 /// número distinto del que la pestaña enseña.
-Future<int> conteoInsigniaVencimientos() async {
-  final activos = await clientesActivos();
-  final hoy = await vencenHoy(activosPre: activos);
-  final m30 = await atrasados(masDe30: false, activosPre: activos);
-  final p30 = await atrasados(masDe30: true, activosPre: activos);
-  final avisados = await LocalDb.instance.avisadosVigentesConFecha();
-  int idDe(Map<String, dynamic> c) => (c['id'] as num?)?.toInt() ?? -1;
-  bool visible(Map<String, dynamic> c) => !esVistaProtegida(c);
-  final atrasadosSinAvisar = [...m30, ...p30]
-      .where((c) => visible(c) && !avisados.containsKey(idDe(c)))
-      .length;
-  return hoy.where(visible).length + atrasadosSinAvisar;
-}
+///
+/// 1.36 (136-237 · PORTAR AL FUNDIR con el carril de
+/// campo, dueño de este archivo): la fórmula única vive
+/// ahora en la capa de datos (`conteoPastillaVencimientos`
+/// en negocio.dart) y esta función solo delega en su
+/// gemela de negocio; la insignia además DECLARA su
+/// fórmula en el Tooltip del segmento («Vencen hoy +
+/// atrasados sin avisar»).
+Future<int> conteoInsigniaVencimientos() =>
+    conteoInsigniaVencimientosDatos();
 
 /// 1.35 (campo nº 13): la fila de acciones del pilar
 /// (Inscribir · Control de Acceso · Papelera) como bloque
@@ -121,15 +116,25 @@ class AccionesPilarClientes extends StatelessWidget {
                       label: const Text('Inscribir'),
                     ),
                   ),
-                  const SizedBox(width: AppEspacio.sm),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const ValueKey('clientes-acceso'),
-                      onPressed: onAcceso,
-                      icon: const Icon(Icons.badge_rounded, size: 19),
-                      label: const Text('Control de Acceso'),
+                  // 1.36 (136-247 · PORTAR AL FUNDIR con el
+                  // carril de campo, dueño de este archivo):
+                  // «Control de Acceso» solo se ofrece al
+                  // dueño — su destino rechaza a cualquier
+                  // otro rol con una pantalla muerta, así que
+                  // ofrecerlo al entrenador era un toque a un
+                  // callejón. Gate en la OFERTA, como la
+                  // Papelera vecina (solo esDueno).
+                  if (esDueno) ...[
+                    const SizedBox(width: AppEspacio.sm),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const ValueKey('clientes-acceso'),
+                        onPressed: onAcceso,
+                        icon: const Icon(Icons.badge_rounded, size: 19),
+                        label: const Text('Control de Acceso'),
+                      ),
                     ),
-                  ),
+                  ],
                   if (esDueno)
                     IconButton(
                       key: const ValueKey('clientes-papelera'),
@@ -321,11 +326,18 @@ class _PilarClientesState extends State<PilarClientes> {
                     // de entrar — solo si es mayor que cero
                     // (la regla del cero de Jc) y solo si la
                     // cifra se pudo leer.
-                    label: Badge(
-                      isLabelVisible:
-                          _urgenciaVenc != null && _urgenciaVenc! > 0,
-                      label: Text('${_urgenciaVenc ?? ''}'),
-                      child: const Text('Vencimientos'),
+                    // 1.36 (136-237): la cifra DECLARA su
+                    // fórmula donde se pinta (pulsación larga):
+                    // no es la suma de las pestañas, es el
+                    // trabajo de aviso que queda por hacer.
+                    label: Tooltip(
+                      message: 'Vencen hoy + atrasados sin avisar',
+                      child: Badge(
+                        isLabelVisible:
+                            _urgenciaVenc != null && _urgenciaVenc! > 0,
+                        label: Text('${_urgenciaVenc ?? ''}'),
+                        child: const Text('Vencimientos'),
+                      ),
                     )),
                 const ButtonSegment(
                     value: 'invitados',

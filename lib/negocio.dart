@@ -426,6 +426,16 @@ Future<List<Map<String, dynamic>>> clientesAlDia(
 /// y en «Al día», con los conteos sumando de más. Cada
 /// cliente sale en UNA sola pestaña; la Casa (que nunca
 /// vence) queda en «Al día», como manda el predicado.
+///
+/// 1.36 (136-241): el cliente EN PAUSA (congelación en
+/// curso) vive TAMBIÉN en esta pestaña, tenga la fecha que
+/// tenga: su vencimiento no corre, no es moroso en ninguna
+/// otra pestaña y sin este rescate el del dueño vencido en
+/// pausa no estaba en NINGUNA (la suma de las pestañas no
+/// llegaba al padrón). La fila lo dice con su chip de pausa
+/// (Listas pasa `enPausa`). En el teléfono del entrenador el
+/// conjunto de pausas viene vacío por diseño (espejo
+/// solo-dueño) y esta rama no añade a nadie.
 Future<List<Map<String, dynamic>>> clientesAlDiaPestana(
     {List<Map<String, dynamic>>? activosPre}) async {
   // 1.28 (M4-A2): [activosPre] permite derivarla de la MISMA
@@ -438,9 +448,66 @@ Future<List<Map<String, dynamic>>> clientesAlDiaPestana(
     for (final c in await porVencer(dias: 3, activosPre: rows))
       if (c['id'] != null) (c['id'] as num).toInt(),
   };
-  return alDia
+  final base = alDia
       .where((c) => !excluidos.contains((c['id'] as num?)?.toInt()))
       .toList();
+  final congelados = await _congeladosEnCurso();
+  if (congelados.isEmpty) return base;
+  final idsBase = {
+    for (final c in base) (c['id'] as num?)?.toInt(),
+  };
+  final pausados = rows
+      .where((c) =>
+          _enPausa(c, congelados) &&
+          !idsBase.contains((c['id'] as num?)?.toInt()) &&
+          !excluidos.contains((c['id'] as num?)?.toInt()))
+      .toList()
+    ..sort(compararPorNombre);
+  return [...base, ...pausados];
+}
+
+/// 1.36 (136-237): LA definición de la cifra de Vencimientos
+/// que pinta la pastilla del pilar — «por avisar»: los que
+/// vencen HOY (avisados o no: hoy aún se les puede cobrar)
+/// más los atrasados de AMBAS bandas (con fecha y sin
+/// fecha) que aún NO tienen aviso vigente. Vive aquí, en la
+/// capa de datos, para que toda superficie que enseñe «la»
+/// cifra de vencimientos consuma la misma fórmula; las
+/// pestañas cuentan su propio conjunto (cada una el suyo,
+/// rotulado) y la insignia del dock de Mostrador es OTRO
+/// agregado (urgencias de toda la casa: atrasados +
+/// incidencias + atención) que se declara donde se pinta.
+/// PURO: testeable sin BD.
+int conteoPastillaVencimientos({
+  required List<Map<String, dynamic>> vencenHoyLista,
+  required List<Map<String, dynamic>> atrasadosLista,
+  required Set<int> avisadosVigentes,
+  required bool Function(Map<String, dynamic>) visible,
+}) {
+  int idDe(Map<String, dynamic> c) => (c['id'] as num?)?.toInt() ?? -1;
+  final hoy = vencenHoyLista.where(visible).length;
+  final atrasadosSinAvisar = atrasadosLista
+      .where((c) => visible(c) && !avisadosVigentes.contains(idDe(c)))
+      .length;
+  return hoy + atrasadosSinAvisar;
+}
+
+/// La cifra de la pastilla, leída del espejo: las MISMAS
+/// funciones que alimentan Listas y su mismo filtro de
+/// protegidos (antes vivía en pilar_clientes.dart; la
+/// fórmula única es [conteoPastillaVencimientos]).
+Future<int> conteoInsigniaVencimientosDatos() async {
+  final activos = await clientesActivos();
+  final hoy = await vencenHoy(activosPre: activos);
+  final m30 = await atrasados(masDe30: false, activosPre: activos);
+  final p30 = await atrasados(masDe30: true, activosPre: activos);
+  final avisados = await LocalDb.instance.avisadosVigentesConFecha();
+  return conteoPastillaVencimientos(
+    vencenHoyLista: hoy,
+    atrasadosLista: [...m30, ...p30],
+    avisadosVigentes: avisados.keys.toSet(),
+    visible: (c) => !esVistaProtegida(c),
+  );
 }
 
 /// Congelación 0.5 · Yunque B (YB-FLU-01): clientes con la
@@ -3121,12 +3188,25 @@ String mensajeWaPorVencer(String nombre, String fechaCorta) =>
     'transferencia 💸 (respóndenos y te pasamos los datos). 💪'
     '$lineaMensajeAutomatico';
 
+/// 1.36 (136-251): el texto del que NUNCA pagó — no está
+/// «vencido» ni «por vencer»: no consta su primer pago.
+/// Antes el sin-fecha caía en el texto de vencido (y en
+/// Listas, en «está por vencer»): las dos cosas falsas.
+String mensajeWaSinFecha(String nombre) =>
+    'Hola $nombre 👋, te escribe Iron Body Gym 🏋️.\n'
+    '📋 Aún no consta tu primer pago de mensualidad. Cuando '
+    'quieras empezar (o seguir) entrenando, puedes hacerlo '
+    'pasando por el gym 🏋️ o por transferencia 💸 '
+    '(respóndenos y te pasamos los datos). ¡Te esperamos! 💪'
+    '$lineaMensajeAutomatico';
+
 /// El mensaje de aviso que corresponde al estado del cliente:
-/// vencido (o sin fecha), vence hoy o por vencer.
+/// sin fecha (nunca pagó), vencido, vence hoy o por vencer.
 String mensajeWaSegunEstado(Map<String, dynamic> c) {
   final nombre = '${c['nombre'] ?? 'Cliente'}'.trim();
   final d = diasRestantes(c['pagado_hasta'] as String?);
-  if (d == null || d < 0) return mensajeWaVencido(nombre);
+  if (d == null) return mensajeWaSinFecha(nombre);
+  if (d < 0) return mensajeWaVencido(nombre);
   if (d == 0) return mensajeWaVenceHoy(nombre);
   final ph = '${c['pagado_hasta']}';
   final fechaCorta = ph.length >= 10
@@ -3252,8 +3332,17 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   // 0) Vencidos (1-30 días de atraso). Van primero: son los que más
   // dinero representan (v1.3.8, 1C: Vencidos > Vencen hoy > Por vencer
   // > Recibos > Cumpleaños).
+  // 1.36 (136-238): la banda +30d TAMBIÉN es «vencido» de la
+  // Bandeja — antes solo entraba la de 1–30 y los más graves
+  // no existían en la superficie del día. El subgrupo de la
+  // bandeja se deriva de dias_atraso (31+ cae en su tramo).
+  // 1.36 (136-251): el sin-fecha lleva SU texto (nunca pagó),
+  // no el de vencido.
   final idsVencidos = <int>{};
-  for (final c in await atrasados(masDe30: false, activosPre: activos)) {
+  for (final c in [
+    ...await atrasados(masDe30: false, activosPre: activos),
+    ...await atrasados(masDe30: true, activosPre: activos),
+  ]) {
     // 1.15 (H5): el filtro de protegido vive en la función, no solo
     // en la pantalla: un no-dueño nunca ve avisos de protegidos,
     // llame quien llame (hoy la bandeja y el contador son del dueño,
@@ -3264,6 +3353,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
     idsVencidos.add(cid);
     final ph = '${c['pagado_hasta'] ?? ''}';
     final dias = _diasAtraso(ph, hoy);
+    final sinFecha = c['pagado_hasta'] == null;
     avisos.add({
       'tipo': 'vencido',
       'cliente_id': cid,
@@ -3275,10 +3365,14 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       // v1.13.0 (Bloque 4): días de atraso numéricos para los
       // subgrupos de la bandeja (1–7 / 8–30 días).
       'dias_atraso': dias,
-      'detalle': dias > 0
-          ? 'Vencido hace $dias día${dias == 1 ? '' : 's'}'
-          : 'Mensualidad vencida',
-      'mensaje': mensajeWaVencido(nombreDe(c)),
+      'detalle': sinFecha
+          ? 'Sin fecha de vencimiento · nunca pagó'
+          : dias > 0
+              ? 'Vencido hace $dias día${dias == 1 ? '' : 's'}'
+              : 'Mensualidad vencida',
+      'mensaje': sinFecha
+          ? mensajeWaSinFecha(nombreDe(c))
+          : mensajeWaVencido(nombreDe(c)),
     });
   }
 

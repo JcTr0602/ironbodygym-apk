@@ -167,6 +167,14 @@ class SenalAtencion {
 /// 1.23 (B2): urgencias que la pestaña «Hoy» anuncia estando en
 /// Módulos — atrasados + incidencias abiertas + personas
 /// esperando la atención del dueño. Función pura para test.
+///
+/// 1.36 (136-237): esta cifra NO es la de Vencimientos ni
+/// pretende serlo — es el agregado de urgencias de TODA la
+/// casa sobre el pilar Mostrador (atrasados todos, avisados
+/// o no, sin los de hoy; más incidencias y atención). La
+/// cifra de vencimientos «por avisar» es otra y tiene su
+/// fórmula única en `conteoPastillaVencimientos`
+/// (negocio.dart), declarada en su propio segmento.
 int urgenciasHome({
   required int atras,
   required int incidencias,
