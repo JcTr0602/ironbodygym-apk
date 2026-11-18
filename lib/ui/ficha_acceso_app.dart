@@ -126,6 +126,18 @@ class _FilaPlusResidualFichaState extends State<FilaPlusResidualFicha> {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-B1 (136-528): la altura de la fila se anima
+    // al aterrizar el resultado (la fila nace, cambia o
+    // desaparece sin salto seco de la tarjeta).
+    return AnimatedSize(
+      duration: AppMovimiento.corta,
+      curve: AppMovimiento.curva,
+      alignment: Alignment.topCenter,
+      child: _fila(context),
+    );
+  }
+
+  Widget _fila(BuildContext context) {
     // 1.36 FICHA (136-196): mientras la RPC del residual
     // resuelve (hasta 12 s), la fila pinta su estado en
     // el hueco que ocupará — la tarjeta Membresía ya no
@@ -134,7 +146,8 @@ class _FilaPlusResidualFichaState extends State<FilaPlusResidualFicha> {
       return const FilaInfoFicha(
           icono: Icons.star_rounded,
           etiqueta: 'Plus',
-          valor: 'Verificando…');
+          // 136-528: el placeholder nombra QUÉ se verifica.
+          valor: 'Verificando Plus…');
     }
     final p = _plus;
     final texto = p == null
@@ -206,8 +219,13 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
     super.initState();
     // Solo el dueño puede cargar el listado (RPC solo-dueño);
     // el entrenador con permiso ve la rama «sin verificar».
-    if (AuthService().isOwner && !AccesoAppCache.instance.cargado) {
-      _verificando = true;
+    // 1.36 H-B1 (136-529): se refresca AL ENTRAR aunque el
+    // caché ya esté cargado (antes, con el caché caliente,
+    // la sección enseñaba la foto vieja sin re-verificar);
+    // el «verificando» visible solo sale si aún no hay
+    // caché que pintar.
+    if (AuthService().isOwner) {
+      _verificando = !AccesoAppCache.instance.cargado;
       unawaited(_cargarCache());
     }
     unawaited(_cargarConversionPendiente());
@@ -273,13 +291,14 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
         ],
       );
     } else if (acceso == null && _sinConexion && !cache.cargado) {
-      contenido = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-              'Sin conexión para verificar acceso.',
-              style: AppTexto.secundario),
-          const SizedBox(height: AppEspacio.sm),
+      // 1.36 H-B1 (136-525): la rama sin conexión es el
+      // AvisoEstado de error de la casa, con su reintento
+      // dentro (antes texto pelado + botón suelto).
+      contenido = AvisoEstado(
+        tipo: TipoAviso.error,
+        texto: 'Sin conexión para verificar el acceso.',
+        icono: Icons.wifi_off_rounded,
+        acciones: [
           OutlinedButton.icon(
             icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('Reintentar'),
@@ -355,7 +374,11 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
         children: [
           ChipEstado.semantico(
             texto: acceso.estado == 'revocado' ? 'Revocado' : 'Inactivo',
-            significado: SignificadoChip.neutral,
+            // 1.36 H-B1 (136-526): Revocado es un estado
+            // DURO (error); Inactivo se queda neutral.
+            significado: acceso.estado == 'revocado'
+                ? SignificadoChip.error
+                : SignificadoChip.neutral,
             icono: Icons.block_rounded,
           ),
           const SizedBox(height: AppEspacio.sm),
@@ -466,9 +489,14 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
-                    'Última verificación: '
+                    // 1.36 H-B1 (136-524): el sello dice
+                    // lo que ES — una verificación
+                    // GUARDADA — sin afirmar el estado de
+                    // la conexión, que esta sección no
+                    // mide.
+                    'Verificación guardada: '
                     '${tiempoRelativo(cache.verificadoEn!.toIso8601String())}'
-                    ' · sin conexión ahora',
+                    ' · datos de otra sesión',
                     style: AppTexto.secundario,
                   ),
                 ),

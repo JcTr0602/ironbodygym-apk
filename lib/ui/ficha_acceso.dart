@@ -207,7 +207,13 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
       body: _cargando && _acceso == null
           ? const EstadoCargando(texto: 'Cargando acceso…')
           : _acceso == null
-              ? const Center(child: Text('No se pudo cargar la ficha.'))
+              // 1.36 H-B1 (136-521): el fallo de carga es
+              // el EstadoError de la casa, CON Reintentar
+              // (antes un texto pelado sin salida).
+              ? EstadoError(
+                  titulo: 'No se pudo cargar la ficha de acceso',
+                  onReintentar: _cargar,
+                )
               : ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
@@ -304,11 +310,6 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
             : a['activo'] != true
                 ? 'Inactivo'
                 : 'Activo';
-    final colorEstado = estado == 'Activo'
-        ? AppColores.exitoOscuro
-        : estado == 'Bloqueado'
-            ? AppColores.alertaOscuro
-            : Colors.grey;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -320,10 +321,19 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 const Text('Datos del acceso',
                     style: AppTexto.subtitulo),
                 const Spacer(),
-                Chip(
-                  label: Text(estado,
-                      style: AppTexto.metadato.copyWith(color: Colors.white)),
-                  backgroundColor: colorEstado,
+                // 1.36 H-B1 (136-519): chip del sistema por
+                // significado — Revocado (error) se
+                // distingue de Inactivo (neutral); antes
+                // ambos caían en el mismo gris crudo.
+                ChipEstado.semantico(
+                  texto: estado,
+                  significado: estado == 'Activo'
+                      ? SignificadoChip.exito
+                      : estado == 'Bloqueado'
+                          ? SignificadoChip.alerta
+                          : estado == 'Revocado'
+                              ? SignificadoChip.error
+                              : SignificadoChip.neutral,
                 ),
               ],
             ),
@@ -337,9 +347,9 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 '${_fmtFecha(a['created_at'])} · por ${a['creado_por'] ?? '—'}'),
             _dato('PIN cambiado', _fmtFecha(a['pin_cambiado_en'])),
             _dato('PIN temporal sin cambiar',
-                a['debe_cambiar_pin'] == true ? 'SÍ' : 'No'),
+                a['debe_cambiar_pin'] == true ? 'Sí' : 'No'),
             _dato('Cambio de PIN forzado',
-                a['forzar_cambio_pin'] == true ? 'SÍ' : 'No'),
+                a['forzar_cambio_pin'] == true ? 'Sí' : 'No'),
             _dato('Intentos fallidos',
                 '${a['intentos_fallidos'] ?? 0} · último: ${_fmtFecha(a['ultimo_intento_fallido_en'])}'),
             if (a['motivo_bloqueo'] != null)
@@ -348,9 +358,19 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               _dato('Bloqueado hasta', _fmtFecha(a['bloqueado_hasta'])),
             if (a['revocado_en'] != null)
               _dato('Revocado el', _fmtFecha(a['revocado_en'])),
-            _dato('Sesión abierta', a['tiene_sesion'] == true
-                ? 'Sí · vence ${_fmtFecha(a['sesion_expira_en'])}'
-                : 'No', ultima: true),
+            // 1.36 H-B1 (136-518): desde el caché el
+            // vencimiento de la sesión NO viene (null):
+            // se dice «vencimiento desconocido», no
+            // «vence —».
+            _dato(
+                'Sesión abierta',
+                a['tiene_sesion'] != true
+                    ? 'No'
+                    : a['sesion_expira_en'] == null
+                        ? 'Sí (vencimiento desconocido)'
+                        : 'Sí · vence '
+                            '${_fmtFecha(a['sesion_expira_en'])}',
+                ultima: true),
             // F3-25: fuera «Versión de sesión» (el token_version
             // crudo): jerga sin uso en la ficha — los cierres y
             // reseteos ya se ven en el historial de abajo.
@@ -485,26 +505,6 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 telefonoActual: '${a['telefono'] ?? ''}',
                 alTerminar: _refrescarTodo)),
       ),
-      if (!revocado)
-        OutlinedButton.icon(
-          icon: const Icon(Icons.block_rounded, size: 18),
-          label: const Text('Revocar acceso'),
-          style: OutlinedButton.styleFrom(
-              foregroundColor: AppColores.error),
-          onPressed: _ocupado
-              ? null
-              : () => _conOcupado(() => accionSimpleAcceso(
-                    context,
-                    clienteId: widget.clienteId,
-                    rpc: 'revocar_acceso_cliente',
-                    mensajeOk: 'Acceso revocado.',
-                    confirmarAntes: true,
-                    titulo: 'Revocar acceso',
-                    texto:
-                        'El cliente ya no podrá entrar a la app. Puedes reactivarlo cuando quieras.',
-                    alTerminar: _refrescarTodo,
-                  )),
-        ),
       if (revocado)
         FilledButton.icon(
           icon: const Icon(Icons.restore_rounded, size: 18),
@@ -557,6 +557,44 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                   ),
                 ],
               ),
+            // 1.36 H-B1 (136-522): lo DESTRUCTIVO vive en
+            // su propio bloque final, fuera de «Más
+            // acciones» — revocar no es una acción más
+            // entre las ocasionales.
+            if (!revocado) ...[
+              const SizedBox(height: AppEspacio.md),
+              const Divider(height: 1),
+              const SizedBox(height: AppEspacio.sm),
+              Text('Zona delicada',
+                  style: AppTexto.cuerpo.copyWith(
+                      color: AppColores.errorTexto(context),
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: AppEspacio.sm),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.block_rounded, size: 18),
+                  label: const Text('Revocar acceso'),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor:
+                          AppColores.errorTexto(context)),
+                  onPressed: _ocupado
+                      ? null
+                      : () => _conOcupado(() => accionSimpleAcceso(
+                            context,
+                            clienteId: widget.clienteId,
+                            rpc: 'revocar_acceso_cliente',
+                            mensajeOk: 'Acceso revocado.',
+                            confirmarAntes: true,
+                            titulo: 'Revocar acceso',
+                            texto:
+                                'El cliente ya no podrá entrar a la app. Puedes reactivarlo cuando quieras.',
+                            peligro: true,
+                            alTerminar: _refrescarTodo,
+                          )),
+                ),
+              ),
+            ],
             if (_ocupado)
               const Padding(
                 padding: EdgeInsets.only(top: AppEspacio.md),
@@ -579,8 +617,13 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 style: AppTexto.subtitulo),
             const SizedBox(height: AppEspacio.sm),
             if (_historial.isEmpty)
-              const Text('Sin ingresos registrados todavía.',
-                  style: AppTexto.secundario),
+              const EstadoVacio(
+                icono: Icons.login_rounded,
+                titulo: 'Sin ingresos registrados todavía',
+                subtitulo:
+                    'Cuando el cliente entre a su app, salen aquí.',
+                sinMarco: true,
+              ),
             for (final h in _historial)
               ListTile(
                 dense: true,
@@ -612,8 +655,13 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 style: AppTexto.subtitulo),
             const SizedBox(height: AppEspacio.sm),
             if (_auditoria.isEmpty)
-              const Text('Sin acciones registradas.',
-                  style: AppTexto.secundario),
+              const EstadoVacio(
+                icono: Icons.history_rounded,
+                titulo: 'Sin acciones registradas',
+                subtitulo:
+                    'Los bloqueos, reseteos y revocaciones salen aquí.',
+                sinMarco: true,
+              ),
             for (final u in _auditoria)
               ListTile(
                 dense: true,

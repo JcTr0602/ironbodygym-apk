@@ -36,6 +36,41 @@ import 'congelaciones.dart';
 String mensajeCierreCongelacionFallido(Object? errorServidor) =>
     'No se pudo cerrar la congelación. Inténtalo de nuevo.';
 
+/// 1.36 H-B1 (136-532): el texto de confirmación del
+/// cierre se CALCULA según la vigencia real — futura (se
+/// cancela con 0 días) o en curso (días hasta ayer, con
+/// los ya materializados dichos) — no un texto fijo que
+/// mezclaba ambos casos.
+String textoCierreCongelacion({
+  required DateTime hoy,
+  DateTime? inicio,
+  int diasYaAplicados = 0,
+}) {
+  final h = DateTime(hoy.year, hoy.month, hoy.day);
+  if (inicio != null) {
+    final i = DateTime(inicio.year, inicio.month, inicio.day);
+    if (i.isAfter(h)) {
+      return 'La congelación aún no ha empezado: se cancela '
+          'con 0 días devueltos. Queda registrado que la '
+          'cerraste tú.';
+    }
+    final dias = h.difference(i).inDays;
+    final aplicados = diasYaAplicados > 0
+        ? ' De ellos, $diasYaAplicados ya están aplicados '
+            'a su vigencia.'
+        : '';
+    return 'La pausa termina ayer: los $dias días '
+        'congelados hasta ayer se le devuelven al '
+        'sincronizar y desde hoy su mensualidad corre '
+        'normal.$aplicados Queda registrado que la '
+        'cerraste tú.';
+  }
+  return 'La pausa termina ayer: los días congelados '
+      'hasta ayer se le devuelven al sincronizar y desde '
+      'hoy su mensualidad corre normal. Queda registrado '
+      'que la cerraste tú.';
+}
+
 String _fmtF(DateTime? d) {
   if (d == null) return '—';
   final dd = d.day.toString().padLeft(2, '0');
@@ -64,7 +99,7 @@ class SeccionCongelacionFicha extends StatefulWidget {
 Widget _cabeceraCongelacion(String texto) => Row(
       children: [
         const Icon(Icons.ac_unit_rounded, size: 20),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppEspacio.sm),
         Expanded(
           child: Text(texto, style: AppTexto.subtitulo),
         ),
@@ -118,24 +153,25 @@ class _SeccionCongelacionFichaState
     }
   }
 
-  void _snack(String texto) {
+  // 1.36 H-B1 (136-531): el snack lleva su significado.
+  void _snack(String texto,
+      {SignificadoChip significado = SignificadoChip.info}) {
     if (!mounted) return;
-    mostrarSnack(context, texto);
+    mostrarSnack(context, texto, significado: significado);
   }
 
-  Future<void> _cerrar(String id) async {
+  Future<void> _cerrar(String id,
+      {DateTime? inicio, int diasYaAplicados = 0}) async {
     final confirma = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Cerrar la congelación ahora',
         iconoTitulo: Icons.ac_unit_rounded,
-        contenido: const Text(
-          'La pausa termina ayer: los días congelados hasta '
-          'ayer se le devuelven al sincronizar y desde hoy su '
-          'mensualidad corre normal. Si aún no había empezado, '
-          'se cancela con 0 días. Queda registrado que la '
-          'cerraste tú.',
-        ),
+        contenido: Text(textoCierreCongelacion(
+          hoy: ahoraHabana(),
+          inicio: inicio,
+          diasYaAplicados: diasYaAplicados,
+        )),
         acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -157,18 +193,22 @@ class _SeccionCongelacionFichaState
       );
       if (!mounted) return;
       if (res['ok'] == true) {
-        _snack(res['ya_cerrada'] == true
-            ? 'La congelación ya estaba cerrada.'
-            : 'Congelación cerrada.');
+        _snack(
+            res['ya_cerrada'] == true
+                ? 'La congelación ya estaba cerrada.'
+                : 'Congelación cerrada.',
+            significado: SignificadoChip.exito);
         await _cargar();
       } else {
         // SL-2 G03-11: antes esta rama pintaba res['error']
         // crudo en el snack; ahora pasa por la rama amable,
         // como el catch de abajo.
-        _snack(mensajeCierreCongelacionFallido(res['error']));
+        _snack(mensajeCierreCongelacionFallido(res['error']),
+            significado: SignificadoChip.error);
       }
     } catch (e) {
-      _snack('No se pudo cerrar: ${mensajeErrorAmable(e)}');
+      _snack('No se pudo cerrar: ${mensajeErrorAmable(e)}',
+          significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _actuando = false);
     }
@@ -190,7 +230,7 @@ class _SeccionCongelacionFichaState
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 8),
+            SizedBox(width: AppEspacio.sm),
             Expanded(child: Text('Congelación: verificando…')),
           ],
         ),
@@ -208,15 +248,17 @@ class _SeccionCongelacionFichaState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_pendiente != null) ...[
+                // 136-531: un solo glifo (el icono de la
+                // cabecera); fuera el ❄️ del texto.
                 _cabeceraCongelacion(
-                    '❄️ Solicitud de congelación pendiente'),
-                const SizedBox(height: 4),
+                    'Solicitud de congelación pendiente'),
+                const SizedBox(height: AppEspacio.xs),
                 Text(
                   '${_fmtF(_pendiente!.desde)} → '
                   '${_fmtF(_pendiente!.hasta)} · '
                   '${etiquetaCategoriaCongelacion(_pendiente!.motivoCategoria)}',
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppEspacio.sm),
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton(
@@ -234,22 +276,46 @@ class _SeccionCongelacionFichaState
               ],
               if (_aprobada != null) ...[
                 if (_pendiente != null) const Divider(),
-                _cabeceraCongelacion('❄️ Congelación aprobada · '
+                _cabeceraCongelacion('Congelación aprobada · '
                     '${_aprobada!.etiquetaEstado(hoy)}'),
-                const SizedBox(height: 4),
+                const SizedBox(height: AppEspacio.xs),
                 Text(
                   '${_fmtF(_aprobada!.inicioEfectivo ?? _aprobada!.desde)}'
                   ' → ${_fmtF(_aprobada!.finEfectivo)}'
                   '${_aprobada!.materializada ? ' · +${_aprobada!.diasMaterializados} días ya aplicados' : ' · su vigencia se extiende al terminar'}',
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppEspacio.sm),
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton.tonal(
                     onPressed: _actuando
                         ? null
-                        : () => _cerrar(_aprobada!.id),
-                    child: const Text('Cerrar ahora'),
+                        : () => _cerrar(_aprobada!.id,
+                            inicio: _aprobada!.inicioEfectivo ??
+                                _aprobada!.desde,
+                            diasYaAplicados:
+                                _aprobada!.materializada
+                                    ? (_aprobada!
+                                            .diasMaterializados ??
+                                        0)
+                                    : 0),
+                    // 136-533: mientras actúa, el botón
+                    // enseña el progreso.
+                    child: _actuando
+                        ? const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2),
+                              ),
+                              SizedBox(width: AppEspacio.sm),
+                              Text('Cerrando…'),
+                            ],
+                          )
+                        : const Text('Cerrar ahora'),
                   ),
                 ),
               ],
@@ -268,19 +334,36 @@ class _SeccionCongelacionFichaState
       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _cabeceraCongelacion('❄️ Congelación aprobada'),
-            const SizedBox(height: 4),
+            _cabeceraCongelacion('Congelación aprobada'),
+            const SizedBox(height: AppEspacio.xs),
             Text(
               '${_fmtF(inicio)} → ${_fmtF(fin)}'
               '${mat != null ? ' · +$mat días ya aplicados' : ' · su vigencia se extiende al terminar'}',
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppEspacio.sm),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.tonal(
-                onPressed:
-                    _actuando ? null : () => _cerrar('${v['id']}'),
-                child: const Text('Cerrar ahora'),
+                onPressed: _actuando
+                    ? null
+                    : () => _cerrar('${v['id']}',
+                        inicio: inicio, diasYaAplicados: mat ?? 0),
+                // 136-533: progreso mientras actúa.
+                child: _actuando
+                    ? const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2),
+                          ),
+                          SizedBox(width: AppEspacio.sm),
+                          Text('Cerrando…'),
+                        ],
+                      )
+                    : const Text('Cerrar ahora'),
               ),
             ),
           ],
