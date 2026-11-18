@@ -6819,15 +6819,29 @@ class LocalDb {
       String fecha, int telegramId) async {
     final d = await db;
     final res = <Map<String, dynamic>>[];
+    // 1.36 (136-925): el día de negocio (Habana) se aplica a
+    // TODAS las filas, no solo a las de columna NULL. La
+    // columna `fecha` de una fila legada puede guardar el
+    // día crudo del texto (pre AT-07) mientras su instante
+    // UTC cae en otro día habanero: la igualdad exacta sobre
+    // la columna la contaba en el día equivocado. Ahora la
+    // SQL solo PRE-filtra con la ventana ±1 día y el filtro
+    // fino fechaNegocioHabana decide sobre cada fila (el
+    // mismo patrón que mirrorPorFecha genérico ya usaba).
     final rows = await d.rawQuery(
-        'SELECT id, data FROM pagos WHERE fecha = ? AND telegram_user_id = ?',
-        [fecha, telegramId]);
+        'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ? '
+        'AND telegram_user_id = ?',
+        [
+          _desplazarDiaTxt(fecha, -1),
+          _desplazarDiaTxt(fecha, 1),
+          telegramId
+        ]);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (fechaNegocioHabana(p['fecha']) == fecha) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     final nulos = await d.rawQuery(
@@ -6835,7 +6849,7 @@ class LocalDb {
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        if ('${p['fecha'] ?? ''}' == fecha &&
+        if (fechaNegocioHabana(p['fecha']) == fecha &&
             normalizarTelegramId(p['telegram_user_id']) == telegramId) {
           res.add({...p, 'id': r['id']});
         }
@@ -7204,14 +7218,29 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> pagosDelMes(String pref) async {
     final d = await db;
     final res = <Map<String, dynamic>>[];
+    // 1.36 (136-925): prefiltro por la ventana del mes ±1 día
+    // en los bordes (último día del mes anterior → primer
+    // día del siguiente) y filtro fino de negocio a TODAS
+    // las filas, como en pagosPorDiaYEntrenador.
+    final primero = '$pref-01';
+    final baseMes = DateTime.tryParse(primero);
+    // Primer día del mes siguiente (borde superior de la
+    // ventana: una fila con columna en ese día puede ser del
+    // último día de ESTE mes en hora de negocio).
+    final siguiente = baseMes == null
+        ? primero
+        : DateTime(baseMes.year, baseMes.month + 1, 1)
+            .toIso8601String()
+            .substring(0, 10);
     final rows = await d.rawQuery(
-        'SELECT id, data FROM pagos WHERE fecha LIKE ?', ['$pref%']);
+        'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ?',
+        [_desplazarDiaTxt(primero, -1), siguiente]);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (fechaNegocioHabana(p['fecha']).startsWith(pref)) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     final nulos =
@@ -7240,15 +7269,22 @@ class LocalDb {
     final whereExtra =
         soloTelegramId == null ? '' : ' AND telegram_user_id = ?';
     final argsExtra = soloTelegramId == null ? <Object>[] : [soloTelegramId];
+    // 1.36 (136-925): ventana ±1 día + filtro fino de
+    // negocio a todas las filas (ver pagosPorDiaYEntrenador).
     final rows = await d.rawQuery(
-        'SELECT id, data FROM pagos WHERE fecha = ?$whereExtra',
-        [fechaIso, ...argsExtra]);
+        'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ?'
+        '$whereExtra',
+        [
+          _desplazarDiaTxt(fechaIso, -1),
+          _desplazarDiaTxt(fechaIso, 1),
+          ...argsExtra
+        ]);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (fechaNegocioHabana(p['fecha']) == fechaIso) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     // H19 (revisión de Argón al Yunque de Sync): el fallback
@@ -7290,14 +7326,19 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> pagosDesde(String desdeIso) async {
     final d = await db;
     final res = <Map<String, dynamic>>[];
+    // 1.36 (136-925): el prefiltro baja un día (una fila con
+    // columna en desde-1 puede ser de `desde` en hora de
+    // negocio) y el filtro fino decide sobre TODAS las filas.
     final rows = await d.rawQuery(
-        'SELECT id, data FROM pagos WHERE fecha >= ?', [desdeIso]);
+        'SELECT id, data FROM pagos WHERE fecha >= ?',
+        [_desplazarDiaTxt(desdeIso, -1)]);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final f = fechaNegocioHabana(p['fecha']);
+        if (f.isNotEmpty && f.compareTo(desdeIso) >= 0) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     final nulos =
@@ -7441,18 +7482,33 @@ class LocalDb {
         if (t != null) tids.add(t);
       }
       if (dias.isNotEmpty && tids.isNotEmpty) {
-        final q = List.filled(dias.length, '?').join(',');
+        // 1.36 (136-925): la ventana de días se ensancha ±1
+        // por día pedido y la pertenencia al par se decide
+        // con el filtro fino de negocio sobre TODAS las
+        // filas (ver pagosPorDiaYEntrenador).
+        final diasVentana = <String>{
+          for (final dia in dias) ...[
+            _desplazarDiaTxt(dia, -1),
+            dia,
+            _desplazarDiaTxt(dia, 1),
+          ],
+        };
+        final q = List.filled(diasVentana.length, '?').join(',');
         final r = List.filled(tids.length, '?').join(',');
         final rows = await d.rawQuery(
             'SELECT id, data FROM pagos WHERE fecha IN ($q) '
             'AND telegram_user_id IN ($r)',
-            [...dias, ...tids]);
+            [...diasVentana, ...tids]);
         for (final row in rows) {
           try {
-            res.add({
-              ...jsonDecode(row['data'] as String) as Map<String, dynamic>,
-              'id': row['id'],
-            });
+            final p = jsonDecode(row['data'] as String)
+                as Map<String, dynamic>;
+            final dia = fechaNegocioHabana(p['fecha']);
+            final tid = normalizarTelegramId(p['telegram_user_id']);
+            if (dia.isEmpty || tid == null) continue;
+            if (pares.contains('$dia|$tid')) {
+              res.add({...p, 'id': row['id']});
+            }
           } catch (_) {}
         }
       }
@@ -7482,16 +7538,26 @@ class LocalDb {
       int telegramId, String prefijoMes) async {
     final d = await db;
     final res = <Map<String, dynamic>>[];
+    // 1.36 (136-925): ventana del mes ±1 día en los bordes y
+    // filtro fino de negocio a todas las filas (como en
+    // pagosDelMes).
+    final primero = '$prefijoMes-01';
+    final baseMes = DateTime.tryParse(primero);
+    final siguiente = baseMes == null
+        ? primero
+        : DateTime(baseMes.year, baseMes.month + 1, 1)
+            .toIso8601String()
+            .substring(0, 10);
     final rows = await d.rawQuery(
         'SELECT id, data FROM pagos WHERE telegram_user_id = ? '
-        'AND fecha LIKE ?',
-        [telegramId, '$prefijoMes%']);
+        'AND fecha >= ? AND fecha <= ?',
+        [telegramId, _desplazarDiaTxt(primero, -1), siguiente]);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (fechaNegocioHabana(p['fecha']).startsWith(prefijoMes)) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     final nulos = await d.rawQuery(
@@ -7517,16 +7583,26 @@ class LocalDb {
       int telegramId, String desde, String hasta) async {
     final d = await db;
     final res = <Map<String, dynamic>>[];
+    // 1.36 (136-925): ventana ensanchada ±1 día y filtro
+    // fino de negocio a todas las filas (ver
+    // pagosPorDiaYEntrenador).
     final rows = await d.rawQuery(
         'SELECT id, data FROM pagos WHERE telegram_user_id = ? '
         'AND fecha >= ? AND fecha <= ?',
-        [telegramId, desde, hasta]);
+        [
+          telegramId,
+          _desplazarDiaTxt(desde, -1),
+          _desplazarDiaTxt(hasta, 1)
+        ]);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final dia = fechaNegocioHabana(p['fecha']);
+        if (dia.isNotEmpty &&
+            dia.compareTo(desde) >= 0 &&
+            dia.compareTo(hasta) <= 0) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     final nulos = await d.rawQuery(
@@ -7606,27 +7682,36 @@ class LocalDb {
     final res = <Map<String, dynamic>>[];
     final List<Map<String, Object?>> rows;
     final List<Map<String, Object?>> nulos;
+    // 1.36 (136-925): ventana ±1 día y filtro fino de
+    // negocio a todas las filas (ver pagosPorDiaYEntrenador);
+    // método y entrenador se siguen filtrando en SQL.
     if (telegramId != null) {
       rows = await d.rawQuery(
-          'SELECT id, data FROM pagos WHERE fecha = ? AND metodo = ? '
-          'AND telegram_user_id = ?',
-          [fecha, metodo, telegramId]);
+          'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ? '
+          'AND metodo = ? AND telegram_user_id = ?',
+          [
+            _desplazarDiaTxt(fecha, -1),
+            _desplazarDiaTxt(fecha, 1),
+            metodo,
+            telegramId
+          ]);
       nulos = await d.rawQuery(
           'SELECT id, data FROM pagos WHERE fecha IS NULL '
           'OR metodo IS NULL OR telegram_user_id IS NULL');
     } else {
       rows = await d.rawQuery(
-          'SELECT id, data FROM pagos WHERE fecha = ? AND metodo = ?',
-          [fecha, metodo]);
+          'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ? '
+          'AND metodo = ?',
+          [_desplazarDiaTxt(fecha, -1), _desplazarDiaTxt(fecha, 1), metodo]);
       nulos = await d.rawQuery(
           'SELECT id, data FROM pagos WHERE fecha IS NULL OR metodo IS NULL');
     }
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (fechaNegocioHabana(p['fecha']) == fecha) {
+          res.add({...p, 'id': r['id']});
+        }
       } catch (_) {}
     }
     for (final r in nulos) {
@@ -7787,15 +7872,25 @@ class LocalDb {
     // filtran en Dart con el mismo criterio del catch.
     if (tabla == 'pagos' && campoFecha == 'fecha') {
       final res = <Map<String, dynamic>>[];
+      // 1.36 (136-925): la rama pagos adopta el MISMO
+      // criterio que la rama genérica de abajo (B-26):
+      // prefiltro con ventana ensanchada ±1 día sobre la
+      // columna y filtro fino fechaNegocioHabana sobre
+      // TODAS las filas — antes la columna exacta decidía
+      // y una fila legada con la columna en el día crudo
+      // caía en otro día que en la rama genérica.
       final rows = await d.rawQuery(
           'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ?',
-          [desde, hasta]);
+          [_desplazarDiaTxt(desde, -1), _desplazarDiaTxt(hasta, 1)]);
       for (final r in rows) {
         try {
-          res.add({
-            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-            'id': r['id'],
-          });
+          final m = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          final dia = fechaNegocioHabana(m[campoFecha]);
+          if (dia.isNotEmpty &&
+              dia.compareTo(desde) >= 0 &&
+              dia.compareTo(hasta) <= 0) {
+            res.add({...m, 'id': r['id']});
+          }
         } catch (_) {}
       }
       final nulos =
