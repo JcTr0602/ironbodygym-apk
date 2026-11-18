@@ -402,6 +402,43 @@ class FotosColaService {
                   '${clienteId != null ? 'cliente $clienteId' : 'suplemento $suplementoId'}');
         }
       }
+      // ARG136-09: el camino de INSCRIPCIÓN (ambos ids
+      // nulos) cuelga la foto del op_uuid de la op de
+      // inscripción, y el bloque de arriba no lo alcanza:
+      // re-encolar bajo el MISMO op_uuid (descartar y
+      // rehacer la foto) dejaba las variantes descartadas
+      // 'pendiente' bajo ese op_uuid, con colisión de
+      // claves TUS (tus_loc_<op_uuid>_<tipo>) entre la
+      // foto descartada y la vigente. Se invalidan igual:
+      // filas y claves TUS por el txn y archivos tras el
+      // commit (patrón B-21). Solo 'pendiente': una fila
+      // 'subiendo' es de un worker activo y no se toca.
+      if (clienteId == null && suplementoId == null) {
+        final viejasMismoUuid = await txn.query(
+          'fotos_cola',
+          columns: ['id', 'op_uuid', 'tipo', 'ruta_local'],
+          where: "estado = 'pendiente' AND op_uuid = ?",
+          whereArgs: [opUuid],
+        );
+        for (final v in viejasMismoUuid) {
+          archivosPorBorrarTrasCommit
+              .add(v['ruta_local'] as String);
+          for (final clave in [
+            'tus_loc_${v['op_uuid']}_${v['tipo']}',
+            'tus_offset_${v['op_uuid']}_${v['tipo']}',
+          ]) {
+            await txn.delete('meta',
+                where: 'k = ?', whereArgs: [clave]);
+          }
+          await txn.delete('fotos_cola',
+              where: 'id = ?', whereArgs: [v['id']]);
+        }
+        if (viejasMismoUuid.isNotEmpty) {
+          AppLog.info('fotos', 'pendientes_invalidadas',
+              d: 'n=${viejasMismoUuid.length} por re-encolado '
+                  'del mismo op_uuid (inscripción)');
+        }
+      }
       for (final entry in variantes.entries) {
         int? tamano;
         try {
