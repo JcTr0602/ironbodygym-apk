@@ -20,6 +20,7 @@ import '../auth.dart';
 import '../errores_sync.dart';
 import '../salud_sync.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import '../ultimo_sync.dart';
 import 'admin_secciones.dart';
 import 'app_bar.dart';
@@ -38,6 +39,7 @@ import 'reparar_sync_screen.dart';
     fallidas: d.fallidas,
     hayTablasEnRojo:
         d.tablas.any((t) => t.estado == SemaforoTabla.rojo),
+    trabajoFueraCola: d.trabajoFueraCola,
   );
   switch (estado) {
     case EstadoSaludSync.todoSubio:
@@ -68,6 +70,10 @@ import 'reparar_sync_screen.dart';
           '${d.fallidas} '
               '${d.fallidas == 1 ? 'operación falló' : 'operaciones fallaron'} '
               'o esperan decisión',
+        if ((d.trabajoFueraCola ?? 0) > 0)
+          'quedan ${d.trabajoFueraCola} '
+              '${d.trabajoFueraCola == 1 ? 'elemento' : 'elementos'} '
+              'por atender fuera de la cola de subida',
         if (d.tablas.any((t) => t.estado == SemaforoTabla.rojo))
           'hay tablas en rojo en el semáforo',
       ];
@@ -271,6 +277,36 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                             sinLeer: d.manifiestoSinLeer)),
                     filaAdmin(context, null, 'Tablas divergentes',
                         '${d.divergentes}', negrita: d.divergentes > 0),
+                    // 1.36 (136-142, C-3): el estado de la
+                    // autocura dicho en una línea HONESTA:
+                    // «divergente» (hay tablas que no cuadran)
+                    // es lo único que se pinta en rojo; el
+                    // ESTALE («sin verificar desde hace
+                    // mucho», con su fecha) va en alerta, no
+                    // en rojo — el campo lo veía todo rojo
+                    // con 0 tablas divergentes.
+                    Builder(builder: (context) {
+                      final estAutocura = estadoAutocura(
+                          completaEn: d.completaEn,
+                          divergentes: d.divergentes,
+                          ahora: ahoraHabana(),
+                          sinLeer: d.manifiestoSinLeer);
+                      return Text(
+                        textoEstadoAutocura(
+                            completaEn: d.completaEn,
+                            divergentes: d.divergentes,
+                            ahora: ahoraHabana(),
+                            sinLeer: d.manifiestoSinLeer),
+                        style: AppTexto.secundario.copyWith(
+                            color: estAutocura ==
+                                    EstadoAutocura.divergente
+                                ? AppColores.error
+                                : estAutocura == EstadoAutocura.estale
+                                    ? AppColores.alertaOscuro
+                                    : AppColores.textoSecundario(
+                                        context)),
+                      );
+                    }),
                     filaAdmin(context, null, 'Sin verificar',
                         d.manifiestoSinLeer
                             ? 'sin verificar'

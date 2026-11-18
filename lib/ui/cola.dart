@@ -804,6 +804,9 @@ class _ColaScreenState extends State<ColaScreen> {
   // A-03 (1.21): comprobantes de pago en error (reintento
   // deliberado, patrón H-12 de fotos de incidencias).
   List<Map<String, dynamic>> _compError = [];
+  // 1.36 (136-142): comprobantes pendientes de subir, para
+  // los totales del héroe (fuera de ops_queue).
+  int _compPendientes = 0;
   // D-12 (1.21): títulos de op memoizados al cargar —
   // tituloDeOp decodifica el payload JSON; hacerlo por op en
   // cada build era el coste real de la lista (la lista en sí
@@ -1063,6 +1066,14 @@ class _ColaScreenState extends State<ColaScreen> {
       compError =
           await ComprobantesService.instance.comprobantesEnError();
     } catch (_) {}
+    // 1.36 (136-142): comprobantes aún pendientes de subir —
+    // entran en el total del héroe para que no diga «Todo
+    // al día» con un comprobante vivo fuera de ops_queue.
+    var compPendientes = 0;
+    try {
+      compPendientes =
+          await LocalDb.instance.contarComprobantesPendientes();
+    } catch (_) {}
     // 1.29 (Oleada 6, D-A3): las filas vivas de la cola se
     // leen UNA vez, con el sello de autor (v68), y de ahí
     // salen contadores y detalle. Antes los contadores eran
@@ -1304,6 +1315,7 @@ class _ColaScreenState extends State<ColaScreen> {
         _nombresFotos = nombresFotos;
         _fotosIncError = fotosIncError;
         _compError = compError;
+        _compPendientes = compPendientes;
         _titulosOp = {
           for (final op in [...opsVisibles, ...bloqueadasVisibles])
             '${op['op_uuid']}': tituloDeOp(op),
@@ -2019,7 +2031,10 @@ class _ColaScreenState extends State<ColaScreen> {
             // v1.8.0 (Frente 5): si al cerrar el ciclo queda algo
             // en la cola, el resumen lo dice con su categoría —
             // prohibido «al día» con pendientes.
-            if (res.pendientesRestantes > 0) ...[
+            // 1.36 (136-142): también con trabajo FUERA de la
+            // cola (el textoPendientes ya lo incluye).
+            if (res.pendientesRestantes > 0 ||
+                res.trabajoFueraCola > 0) ...[
               const SizedBox(height: 12),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2059,6 +2074,7 @@ class _ColaScreenState extends State<ColaScreen> {
             if (subidos == 0 &&
                 bajados == 0 &&
                 res.pendientesRestantes == 0 &&
+                res.trabajoFueraCola == 0 &&
                 !res.conteoIndeterminado &&
                 (error == null || error.isEmpty))
               Padding(
@@ -2796,6 +2812,22 @@ class _ColaScreenState extends State<ColaScreen> {
             significado: SignificadoChip.error);
       }
     }
+    // 1.36 (136-142, C-3): el gesto de reconocer el rechazo
+    // EXPLICADO — solo para una 'rechazada' que trae motivo
+    // del servidor y aún no fue reconocida. Una en
+    // 'necesita_revision' NO lo ofrece: espera decisión real.
+    final motivoServidor = LocalDb.motivoServidorDeOp(op);
+    var yaReconocida = false;
+    if (estado == 'rechazada') {
+      try {
+        yaReconocida = (await LocalDb.instance
+                .opsRechazadasReconocidas())
+            .contains('${op['op_uuid']}');
+      } catch (_) {}
+    }
+    final puedeReconocer = estado == 'rechazada' &&
+        motivoServidor != null &&
+        !yaReconocida;
     if (!mounted) return;
     showDialog(
       context: context,
@@ -2850,9 +2882,25 @@ class _ColaScreenState extends State<ColaScreen> {
                     style: AppTexto.secundario),
               ],
             ],
+            if (yaReconocida) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Rechazo ya reconocido: quedó en la bitácora '
+                'y no cuenta en el aviso de sincronización.',
+                style: AppTexto.secundario,
+              ),
+            ],
           ],
         ),
         acciones: [
+          if (puedeReconocer)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await _reconocerRechazada(op);
+              },
+              child: const Text('Reconocer rechazo'),
+            ),
           if (estado == 'rechazada') ...[
             TextButton(
               onPressed: () async {
@@ -2873,6 +2921,28 @@ class _ColaScreenState extends State<ColaScreen> {
     );
   }
 
+  /// 1.36 (136-142, C-3): reconoce el rechazo explicado de
+  /// una op: queda en bitácora y sale de la cuenta del aviso
+  /// (LocalDb.marcarOpRechazadaReconocida). La op no se
+  /// borra ni cambia de estado: solo deja de contar como
+  /// trabajo pendiente de decisión.
+  Future<void> _reconocerRechazada(Map<String, dynamic> op) async {
+    final ok = await LocalDb.instance
+        .marcarOpRechazadaReconocida('${op['op_uuid']}');
+    if (!mounted) return;
+    mostrarSnack(
+      context,
+      ok
+          ? 'Rechazo reconocido: queda en la bitácora y sale '
+              'de la cuenta del aviso'
+          : 'No se pudo reconocer: la operación no está '
+              'rechazada con motivo del servidor',
+      significado:
+          ok ? SignificadoChip.exito : SignificadoChip.alerta,
+    );
+    if (ok) _cargar();
+  }
+
   /// Detalles legibles del payload segun el tipo de operacion (v1.0.11).
   /// v1.3.4: delega en la funcion top-level [detallesDeOp].
   Future<List<String>> _detallesOp(Map<String, dynamic> op) =>
@@ -2888,11 +2958,20 @@ class _ColaScreenState extends State<ColaScreen> {
     // fuera de la ventana por 30 ops más recientes dejaba de
     // contar y el héroe decía «Todo subió» con la op fallida
     // viva en la BD.
-    final totalError = _heroErrorOps + _fotosError;
+    // 1.36 (136-142): el héroe suma TAMBIÉN lo que vive
+    // fuera de ops_queue y no entraba en ningún total:
+    // comprobantes en error, fotos de incidencias en error
+    // (al error) y comprobantes pendientes (al pendiente).
+    // Las rechazadas reconocidas ya salieron de
+    // _heroErrorOps en LocalDb.conteosHeroeCola.
+    final totalError =
+        _heroErrorOps + _fotosError + _compError.length + _fotosIncError.length;
     // v1.2.9+46 (Gemini): 'enviada' = confirmación pendiente (ámbar).
     final enLimbo = _heroEnLimbo;
-    final totalPendiente =
-        _totalPendientes + _fotosPendientes + _fotosSubiendo;
+    final totalPendiente = _totalPendientes +
+        _fotosPendientes +
+        _fotosSubiendo +
+        _compPendientes;
     final errorReciente = _det.error;
     // v1.0.14: tres estados claros en vez de binario ok/error
     // v1.1: icono Material en vez de emoji

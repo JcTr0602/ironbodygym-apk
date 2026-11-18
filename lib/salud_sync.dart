@@ -200,6 +200,14 @@ class SaludSyncDatos {
   final int? pendientes;
   final int? fallidas;
 
+  /// 1.36 (136-142, E-01): trabajo vivo FUERA de la cola de
+  /// subida (LocalDb.conteoTrabajoFueraCola): revisión,
+  /// rechazadas sin reconocer, fotos pendientes/en error,
+  /// comprobantes sin subir/en error, incidencias en error.
+  /// null = el conteo no se pudo leer («sin verificar»,
+  /// jamás «al día» sobre un cero fingido).
+  final int? trabajoFueraCola;
+
   /// Yunque 3 (K1-4): modo de diario EFECTIVO de la BD local
   /// (meta `journal_mode_efectivo`, la constancia que deja
   /// LocalDb en cada apertura). '' = sin constancia leída.
@@ -231,6 +239,7 @@ class SaludSyncDatos {
     required this.telefonos,
     this.pendientes,
     this.fallidas,
+    this.trabajoFueraCola,
     this.modoDiarioEfectivo = '',
     this.manifiestoSinLeer = false,
     this.copiaSinLeer = false,
@@ -299,15 +308,83 @@ EstadoSaludSync estadoSaludSync({
   required int? pendientes,
   required int? fallidas,
   required bool hayTablasEnRojo,
+  // 1.36 (136-142): el trabajo fuera de la cola también
+  // impide el «todo subió»: > 0 es fallo que atender;
+  // null (no se pudo leer) es «sin verificar». Default 0
+  // para los llamadores previos a esta pieza.
+  int? trabajoFueraCola = 0,
 }) {
-  if ((fallidas ?? 0) > 0 || hayTablasEnRojo) {
+  if ((fallidas ?? 0) > 0 ||
+      (trabajoFueraCola ?? 0) > 0 ||
+      hayTablasEnRojo) {
     return EstadoSaludSync.fallo;
   }
-  if (pendientes == null || fallidas == null) {
+  if (pendientes == null || fallidas == null || trabajoFueraCola == null) {
     return EstadoSaludSync.sinVerificar;
   }
   if (pendientes > 0) return EstadoSaludSync.quedanCambios;
   return EstadoSaludSync.todoSubio;
+}
+
+/// 1.36 (136-142, C-3): el estado de la AUTOCURA (manifiesto)
+/// distinguiendo lo que el campo confundía: «sin verificar
+/// desde hace mucho» (ESTALE) no es «divergente» (hay tablas
+/// que no cuadran). Hasta hoy ambos se pintaban igual y el
+/// banner quedaba «en rojo» por una completa vieja con 0
+/// tablas divergentes. FUNCIÓN PURA.
+enum EstadoAutocura { coincide, divergente, estale, nuncaCompleta, sinLeer }
+
+/// Umbral de estale: la cadencia de las pasadas completas
+/// del manifiesto (SyncEngine.diasEntreManifiestosCompletos).
+/// Una completa más vieja que eso está vencida: se dice
+/// «sin verificar desde…», no «divergente».
+EstadoAutocura estadoAutocura({
+  required DateTime? completaEn,
+  required int divergentes,
+  required DateTime ahora,
+  bool sinLeer = false,
+}) {
+  if (sinLeer) return EstadoAutocura.sinLeer;
+  if (divergentes > 0) return EstadoAutocura.divergente;
+  if (completaEn == null) return EstadoAutocura.nuncaCompleta;
+  if (ahora.difference(completaEn) >=
+      const Duration(days: SyncEngine.diasEntreManifiestosCompletos)) {
+    return EstadoAutocura.estale;
+  }
+  return EstadoAutocura.coincide;
+}
+
+/// El texto del estado de la autocura, con su fecha cuando
+/// es estale. Solo «divergente» es un problema de datos;
+/// estale es un aviso de frescura de la comprobación.
+String textoEstadoAutocura({
+  required DateTime? completaEn,
+  required int divergentes,
+  required DateTime ahora,
+  bool sinLeer = false,
+}) {
+  final e = estadoAutocura(
+      completaEn: completaEn,
+      divergentes: divergentes,
+      ahora: ahora,
+      sinLeer: sinLeer);
+  switch (e) {
+    case EstadoAutocura.sinLeer:
+      return 'Sin verificar: no se pudo leer el estado de la autocura';
+    case EstadoAutocura.divergente:
+      return 'Divergente: $divergentes '
+          '${divergentes == 1 ? 'tabla no coincide' : 'tablas no coinciden'} '
+          'con el servidor';
+    case EstadoAutocura.nuncaCompleta:
+      return 'Aún no se ha hecho ninguna comprobación completa';
+    case EstadoAutocura.estale:
+      return 'Sin verificar desde hace mucho: la última '
+          'comprobación completa fue el '
+          '${textoFechaSaludSync(completaEn)} y no encontró '
+          'tablas divergentes';
+    case EstadoAutocura.coincide:
+      return 'Al día: la última comprobación completa coincide';
+  }
 }
 
 String _notaTabla({
@@ -630,6 +707,13 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     pendientes = await db.countPendingOps();
     fallidas = await db.countOpsFallidas();
   } catch (_) {}
+  // 1.36 (136-142): el trabajo fuera de la cola entra en la
+  // foto de Salud; si su conteo falla queda null («sin
+  // verificar»), no un cero fingido.
+  int? trabajoFueraCola;
+  try {
+    trabajoFueraCola = (await db.conteoTrabajoFueraCola()).total;
+  } catch (_) {}
 
   return SaludSyncDatos(
     tablas: tablas,
@@ -642,6 +726,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     telefonos: telefonos,
     pendientes: pendientes,
     fallidas: fallidas,
+    trabajoFueraCola: trabajoFueraCola,
     modoDiarioEfectivo: modoDiarioEfectivo,
     manifiestoSinLeer: manifiestoSinLeer,
     copiaSinLeer: copiaSinLeer,

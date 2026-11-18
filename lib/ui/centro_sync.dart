@@ -280,6 +280,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
               ),
             ],
             if (res.pendientesRestantes > 0 ||
+                res.trabajoFueraCola > 0 ||
                 res.conteoIndeterminado) ...[
               const SizedBox(height: 12),
               Text(res.textoPendientes, style: AppTexto.secundario),
@@ -287,6 +288,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
             if (res.subidos == 0 &&
                 res.bajados == 0 &&
                 res.pendientesRestantes == 0 &&
+                res.trabajoFueraCola == 0 &&
                 !res.conteoIndeterminado &&
                 (error == null || error.isEmpty))
               const Padding(
@@ -631,12 +633,25 @@ String resumenMostradorSync({
   // «sin verificar», pero no sobre pendientes, novedades
   // ni la falta de conexión, que van antes.
   bool avisoPersistido = false,
+  // 1.36 (136-142, E-01; absorbe a D-11): el trabajo fuera
+  // de la cola de subida (revisión/rechazadas sin
+  // reconocer, fotos pendientes/en error, comprobantes e
+  // incidencias en error, de la foto del motor). Con esta
+  // cifra > 0 el veredicto NO es «Todo al día»: va tras los
+  // pendientes de la cola (lo accionable primero) y antes
+  // del resto de ramas tranquilas.
+  int fueraCola = 0,
 }) {
   if (corriendo) return 'Sincronizando ahora…';
   if (pendientes > 0) {
     return pendientes == 1
         ? 'Falta 1 por subir'
         : 'Faltan $pendientes por subir';
+  }
+  if (fueraCola > 0) {
+    return fueraCola == 1
+        ? 'Queda 1 por atender fuera de la cola'
+        : 'Quedan $fueraCola por atender fuera de la cola';
   }
   if (hayError) {
     return 'La última sincronización falló: toca '
@@ -917,7 +932,10 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
         st.pending == 0 &&
         st.enLinea != false &&
         st.hayNovedades != true;
-    final enErrorVisible = enError || avisoPersistidoManda;
+    // 1.36 (136-142): el trabajo fuera de la cola también
+    // pinta el icono de problema, nunca el check verde.
+    final enErrorVisible =
+        enError || avisoPersistidoManda || st.fueraCola > 0;
     // E3 (C2-02): el veredicto «Sin verificar» se pinta en
     // neutro, nunca con el check verde de «al día».
     // S-01: con aviso persistido mandando, el veredicto es
@@ -938,6 +956,7 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
       hayError: enError,
       hayNovedades: st.hayNovedades,
       avisoPersistido: st.avisoSyncCorto != null,
+      fueraCola: st.fueraCola,
     );
     return Tarjeta(
       child: Column(

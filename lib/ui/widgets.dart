@@ -712,6 +712,27 @@ Future<void> copiar(BuildContext context, String texto) async {
       pendientes: s.pending,
     );
   }
+  // 1.36 (136-142, E-01): con la cola de subida vacía puede
+  // quedar trabajo FUERA de ella (revisión/rechazadas sin
+  // reconocer, fotos, comprobantes, incidencias): la
+  // cabecera no dice «Al día» con esa cifra > 0, y si el
+  // conteo no se pudo leer tampoco (sin verificar).
+  if (s.fueraCola > 0) {
+    return (
+      icono: Icons.sync_problem_rounded,
+      color: AppColores.alerta,
+      texto: '${s.fueraCola} por atender fuera de la cola',
+      pendientes: s.fueraCola,
+    );
+  }
+  if (s.fueraColaSinLeer) {
+    return (
+      icono: Icons.help_outline_rounded,
+      color: AppColores.alertaOscuro,
+      texto: 'Sincronización sin verificar',
+      pendientes: 0,
+    );
+  }
   if (s.avisoSyncCorto != null) {
     final h = haceTxt(s.avisoSyncTs);
     return (
