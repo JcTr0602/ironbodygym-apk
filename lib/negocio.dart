@@ -1088,8 +1088,11 @@ String textoTotalVenta(double total, String moneda, double? tasa) {
     return '${total.toStringAsFixed(2)} USD'
         '${mostrarCup && cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}';
   }
+  // ARG136-06: la rama CUP exige lo mismo que la USD —
+  // tasa > 1.0. Con la tasa centinela 1.0 («no indicada»)
+  // enseñaba una equivalencia falsa «≈ 2000.00 USD».
   return '${total.toStringAsFixed(0)} $moneda'
-      '${hayTasa && moneda == 'CUP' ? ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)' : ''}';
+      '${hayTasa && tasa > 1.0 && moneda == 'CUP' ? ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)' : ''}';
 }
 
 /// Precio oficial (USD) expresado en la moneda de la venta.

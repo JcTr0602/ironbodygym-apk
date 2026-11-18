@@ -1174,7 +1174,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// el USD no se convierte (solo suma el CUP).
   double _montoCupTotal(Map<String, dynamic> a) {
     final m = _montosDe(a);
-    return m.$1 + (_tasaUsd > 0 ? m.$2 * _tasaUsd : 0);
+    // ARG136-06: la tasa centinela 1.0 no convierte (es
+    // «tasa no indicada», no una tasa real).
+    return m.$1 + (_tasaUsd > 1.0 ? m.$2 * _tasaUsd : 0);
   }
 
   /// v1.3.7 (Fase 2, B2): ¿el item pasa el filtro por monto?
@@ -1980,7 +1982,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
           await _persistirGuardados();
         },
         alGuardarActuales: _guardarFiltroActual,
-        tasaDisponible: _tasaUsd > 0,
+        tasaDisponible: _tasaUsd > 1.0,
       ),
     );
     if (r == null || !mounted) return;
@@ -2480,7 +2482,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
         cup = m.$1;
         usd = m.$2;
       }
-      total += cup + (_tasaUsd > 0 ? usd * _tasaUsd : 0);
+      total += cup + (_tasaUsd > 1.0 ? usd * _tasaUsd : 0);
     }
     return total;
   }
@@ -2585,7 +2587,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     // Total actual en CUP (convierte el USD con la tasa del día).
     final kpi = _kpi(filtrados);
     final actualCup = totalCup +
-        (_tasaUsd > 0 ? kpi.$3 * _tasaUsd : 0);
+        (_tasaUsd > 1.0 ? kpi.$3 * _tasaUsd : 0);
     final previo = _totalEnRango(_items, ant.$1, ant.$2);
     // (1.36 H-B4 136-997) el previo se calcula sobre TODOS
     // los ítems del rango anterior, sin los filtros no
