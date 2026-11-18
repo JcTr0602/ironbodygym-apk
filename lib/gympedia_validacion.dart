@@ -33,17 +33,35 @@ class GympediaValidacion {
 
   /// Buscador de GymPedia (20/25, PURO): coincide por título,
   /// slug o nombre de categoría, sin mayúsculas.
+  /// 1.36 H-C2 (136-956, pura): minúsculas y sin
+  /// acentos (mapeo 1:1, el mismo criterio que el
+  /// sinTildes de Actividad) para comparar la búsqueda.
+  static String _normalizarBusqueda(String s) {
+    const con = 'áéíóúüñÁÉÍÓÚÜÑ';
+    const sin = 'aeiouunAEIOUUN';
+    final lower = s.toLowerCase();
+    final buf = StringBuffer();
+    for (var i = 0; i < lower.length; i++) {
+      final c = lower[i];
+      final idx = con.indexOf(c);
+      buf.write(idx >= 0 ? sin[idx] : c);
+    }
+    return buf.toString();
+  }
+
   static bool coincideBusqueda(
       Map<String, dynamic> articulo, String texto) {
-    final q = texto.trim().toLowerCase();
+    // 136-956: la coincidencia ignora acentos además de
+    // mayúsculas: «nutricion» encuentra «Nutrición».
+    final q = _normalizarBusqueda(texto.trim());
     if (q.isEmpty) return true;
     final cat = '${articulo['categoria'] ?? ''}';
-    final nombreCat = (nombreCategoria[cat] ?? '').toLowerCase();
-    return '${articulo['titulo'] ?? ''}'
-            .toLowerCase()
+    final nombreCat =
+        _normalizarBusqueda(nombreCategoria[cat] ?? '');
+    return _normalizarBusqueda('${articulo['titulo'] ?? ''}')
             .contains(q) ||
-        '${articulo['slug'] ?? articulo['id'] ?? ''}'
-            .toLowerCase()
+        _normalizarBusqueda(
+                '${articulo['slug'] ?? articulo['id'] ?? ''}')
             .contains(q) ||
         nombreCat.contains(q);
   }

@@ -39,13 +39,31 @@ class _EditorPlanNutricionalState
   // guardable, y teclear encima sobrescribía a ciegas el
   // plan que el servidor sí tenía.
   bool _falloCarga = false;
+  // 1.36 H-C2 (136-960): el contenido tal como cargó —
+  // salir con el texto cambiado pide confirmación.
+  String _contenidoCargado = '';
+  bool get _hayCambios =>
+      !_cargando && !_falloCarga && _ctrl.text != _contenidoCargado;
   String? _actualizadoPor;
   String? _creadoPor;
   DateTime? _actualizadoEn;
 
+  // 136-960: el PopScope se reconstruye cuando el
+  // estado «hay cambios» VOLTEA (escribir no llama a
+  // setState por sí solo).
+  bool _cambiosPrev = false;
+  void _alCambiarTexto() {
+    final h = _hayCambios;
+    if (h != _cambiosPrev) {
+      _cambiosPrev = h;
+      if (mounted) setState(() {});
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _ctrl.addListener(_alCambiarTexto);
     _cargar();
   }
 
@@ -73,7 +91,21 @@ class _EditorPlanNutricionalState
             params: {'p_cliente_id': widget.clienteId},
           )
           .timeout(const Duration(seconds: 12));
-      if (res != null && mounted) {
+      // 1.36 H-C2 (136-960): una respuesta NULA del
+      // servidor es FALLO de carga, no «plan vacío
+      // editable» (antes el else solo bajaba _cargando y
+      // el editor abría en blanco, listo para pisar el
+      // plan real al guardar).
+      if (res == null) {
+        if (mounted) {
+          setState(() {
+            _falloCarga = true;
+            _cargando = false;
+          });
+        }
+        return;
+      }
+      if (mounted) {
         // Fix 2026-10-19: el RPC puede devolver List (PostgREST) o Map.
         dynamic data = res;
         if (data is List && data.isNotEmpty) {
@@ -100,6 +132,7 @@ class _EditorPlanNutricionalState
         }
         setState(() {
           _ctrl.text = contenido;
+          _contenidoCargado = contenido;
           // (1.36 H-B4 136-961) la metadata se etiqueta con
           // el campo REAL: quien actualizó si el servidor lo
           // trae; si no, se dice «Creado por» (antes se
@@ -115,8 +148,6 @@ class _EditorPlanNutricionalState
           }
           _cargando = false;
         });
-      } else if (mounted) {
-        setState(() => _cargando = false);
       }
     } catch (e) {
       // 1.25 T123 (F6-06): mensaje en claro; la excepción
@@ -162,6 +193,9 @@ class _EditorPlanNutricionalState
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
       if (mounted) {
+        // 136-960: lo recién guardado ES la base — el
+        // pop de salida no debe pedir confirmación.
+        _contenidoCargado = _ctrl.text;
         mostrarSnack(context, 'Plan guardado', significado: SignificadoChip.exito);
         Navigator.pop(context, true);
       }
@@ -230,7 +264,28 @@ class _EditorPlanNutricionalState
     final puedeEditar = AuthService().isOwner ||
         PermisosEntrenador().canEditNutrition;
 
-    return Scaffold(
+    // 1.36 H-C2 (136-960): salir con cambios sin
+    // guardar pide confirmación (antes se perdían en
+    // silencio al volver).
+    return PopScope(
+      canPop: !_hayCambios,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final salir = await DialogoApp.confirmar(
+          context,
+          titulo: 'Cambios sin guardar',
+          mensaje:
+              'Tienes cambios en el plan que aún no se han guardado.',
+          aceptar: 'Salir sin guardar',
+          cancelar: 'Seguir editando',
+          icono: Icons.warning_amber_rounded,
+          peligro: true,
+        );
+        if (salir && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: appBarIron(
         context,
         'Plan: ${widget.nombreCliente}',
@@ -361,6 +416,7 @@ class _EditorPlanNutricionalState
                 const SizedBox(height: 16),
               ],
             ),
+      ),
     );
   }
 }

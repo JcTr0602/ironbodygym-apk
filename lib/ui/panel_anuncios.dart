@@ -88,7 +88,11 @@ class PanelAnunciosScreen extends StatefulWidget {
 class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
   bool _cargando = true;
   bool _falloCarga = false;
-  bool _resolviendo = false;
+  // 1.36 H-C2 (136-970): el «resolviendo» es POR
+  // TARJETA (antes un bool único apagaba los botones de
+  // TODAS mientras una sola resolvía).
+  final Set<int> _resolviendoIds = {};
+  bool get _resolviendoAlguno => _resolviendoIds.isNotEmpty;
   bool _editando = false;
   List<AnuncioAdmin> _anuncios = const [];
 
@@ -338,8 +342,8 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
   /// abrir el editor: viaja por la misma RPC de guardado
   /// con la foto completa del anuncio.
   Future<void> _alternarActivo(AnuncioAdmin a) async {
-    if (_resolviendo) return;
-    setState(() => _resolviendo = true);
+    if (_resolviendoIds.contains(a.id)) return;
+    setState(() => _resolviendoIds.add(a.id));
     try {
       final res =
           await _guardarVerificado(_datosDe(a, activo: !a.activo));
@@ -363,12 +367,12 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
         _avisar('Sin conexión: el cambio no se aplicó.');
       }
     } finally {
-      if (mounted) setState(() => _resolviendo = false);
+      if (mounted) setState(() => _resolviendoIds.remove(a.id));
     }
   }
 
   Future<void> _borrar(AnuncioAdmin a) async {
-    if (_resolviendo) return;
+    if (_resolviendoIds.contains(a.id)) return;
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Borrar anuncio',
@@ -380,7 +384,7 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
       peligro: true,
     );
     if (!ok || !mounted) return;
-    setState(() => _resolviendo = true);
+    setState(() => _resolviendoIds.add(a.id));
     try {
       final res =
           await (widget.borrarAnuncio ?? _borrarReal)(a.id);
@@ -397,7 +401,7 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
         _avisar('Sin conexión: el anuncio no se borró.');
       }
     } finally {
-      if (mounted) setState(() => _resolviendo = false);
+      if (mounted) setState(() => _resolviendoIds.remove(a.id));
     }
   }
 
@@ -477,7 +481,7 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
                 onPressed:
-                    _resolviendo ? null : () => _editar(null),
+                    _resolviendoAlguno ? null : () => _editar(null),
                 icon: const Icon(Icons.campaign_rounded,
                     size: 18),
                 label: const Text('Nuevo anuncio'),
@@ -492,7 +496,7 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
       appBar: appBarIron(context, 'Anuncio a clientes'),
       body: _cuerpo(),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _resolviendo ? null : () => _editar(null),
+        onPressed: _resolviendoAlguno ? null : () => _editar(null),
         icon: const Icon(Icons.campaign_rounded),
         label: const Text('Nuevo anuncio'),
       ),
@@ -596,18 +600,25 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               IconButton(
+                // 136-970: tooltip en borrar (faltaba).
+                tooltip: 'Borrar anuncio',
                 icon: const Icon(Icons.delete_outline_rounded,
                     size: 20),
-                onPressed: _resolviendo ? null : () => _borrar(a),
+                onPressed: _resolviendoIds.contains(a.id)
+                    ? null
+                    : () => _borrar(a),
               ),
               TextButton(
-                onPressed:
-                    _resolviendo ? null : () => _alternarActivo(a),
+                onPressed: _resolviendoIds.contains(a.id)
+                    ? null
+                    : () => _alternarActivo(a),
                 child: Text(a.activo ? 'Retirar' : 'Reactivar'),
               ),
               const SizedBox(width: 4),
               FilledButton.icon(
-                onPressed: _resolviendo ? null : () => _editar(a),
+                onPressed: _resolviendoIds.contains(a.id)
+                    ? null
+                    : () => _editar(a),
                 icon: const Icon(Icons.edit_rounded, size: 18),
                 label: const Text('Editar'),
               ),
@@ -655,6 +666,9 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
   final Set<int> _elegidos = {};
   List<({int id, String nombre})> _clientes = const [];
   bool _cargandoClientes = false;
+  // 1.36 H-C2 (136-970): la carga de la audiencia falló
+  // (distinguible de «no hay clientes»).
+  bool _errorClientes = false;
   String? _error;
   bool _guardando = false;
 
@@ -703,10 +717,19 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
         setState(() {
           _clientes = lista;
           _cargandoClientes = false;
+          _errorClientes = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _cargandoClientes = false);
+      // 1.36 H-C2 (136-970): el fallo de la audiencia NO
+      // es una lista vacía: queda marcado y la UI lo
+      // dice con reintento.
+      if (mounted) {
+        setState(() {
+          _cargandoClientes = false;
+          _errorClientes = true;
+        });
+      }
     }
   }
 
@@ -923,6 +946,25 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
                 const Padding(
                   padding: EdgeInsets.all(AppEspacio.md),
                   child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_errorClientes && _clientes.isEmpty)
+                // 136-970: fallo de audiencia con
+                // reintento, no lista vacía muda.
+                Padding(
+                  padding: const EdgeInsets.all(AppEspacio.md),
+                  child: Column(
+                    children: [
+                      Text(
+                        'No se pudo cargar la lista de clientes.',
+                        style: AppTexto.secundario,
+                        textAlign: TextAlign.center,
+                      ),
+                      TextButton(
+                        onPressed: _cargarClientes,
+                        child: const Text('Reintentar'),
+                      ),
+                    ],
+                  ),
                 )
               else
                 // Columna, no ListView: el contenido del

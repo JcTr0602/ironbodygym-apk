@@ -58,7 +58,7 @@ PlantillaRender renderPlantilla(
     String cuerpo, Map<String, String> datos) {
   final bloqueadas = <String>[];
   String sustituir(Match m) {
-    final v = m.group(1)!;
+    final v = (m.group(1) ?? m.group(2))!;
     if (kVariablesPlantilla.contains(v)) {
       return datos[v] ?? m.group(0)!;
     }
@@ -66,14 +66,15 @@ PlantillaRender renderPlantilla(
     return m.group(0)!;
   }
 
-  var texto = cuerpo.replaceAllMapped(
-      RegExp(r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}'),
+  // 1.36 H-C2 (136-976): UNA sola pasada con la regex
+  // alterna (doble primero, simple después). Con dos
+  // pasadas, un VALOR insertado que trajera llaves se
+  // re-escaneaba y podía sustituirse o corromperse en
+  // la segunda; en una pasada lo insertado no se toca.
+  final texto = cuerpo.replaceAllMapped(
+      RegExp(
+          r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}'),
       sustituir);
-  // Segunda pasada, llave simple: lo que quede de una doble NO
-  // permitida se repone idéntico (sustituir devuelve el propio
-  // match), así que nada se corrompe.
-  texto = texto.replaceAllMapped(
-      RegExp(r'\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}'), sustituir);
   return PlantillaRender(texto, bloqueadas);
 }
 
@@ -106,7 +107,11 @@ String? avisoFrescura({
   // se normaliza con aHabana antes de restar, como en hace(),
   // para que el aviso de «sync vieja» no salte ni se duerma
   // por la zona del teléfono.
-  final horas = ahora.difference(ts.isUtc ? aHabana(ts) : ts).inHours;
+  // 1.36 H-C2 (136-975): TODO sello parseado se normaliza
+  // con aHabana(ts.toUtc()) — un sello sin offset se
+  // parseaba como hora local del dispositivo y, fuera de
+  // La Habana, la resta salía desplazada.
+  final horas = ahora.difference(aHabana(ts.toUtc())).inHours;
   if (horas > 2) {
     return '⚠️ Última sync hace $horas h. '
         'Confirma si el cliente ya pagó en el turno antes de enviar';

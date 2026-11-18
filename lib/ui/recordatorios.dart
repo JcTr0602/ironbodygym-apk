@@ -242,8 +242,11 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
             '${d.yaDisparado ? ' · ya disparado hoy' : ''}'
             '${!d.yaDisparado && !d.puedoDisparar ? ' · lo dispara el dueño' : ''}',
             style: AppTexto.secundario),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+        // 1.36 H-C2 (136-980): las acciones envuelven
+        // (Wrap) en vez de desbordar en estrecho.
+        trailing: Wrap(
+          spacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             if (telWa.isNotEmpty)
               TextButton(
@@ -313,7 +316,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
     } catch (e) {
       if (mounted) {
         mostrarSnack(
-            context, e.toString().replaceFirst('Exception: ', ''),
+            context, mensajeErrorAmable(e),
             significado: SignificadoChip.error);
       }
       return;
@@ -388,14 +391,16 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
         'cumpleanos': 'Cumpleaños',
         'personalizado': 'Personalizado',
       }[tipo] ??
-      tipo;
+      // 1.36 H-C2 (136-981): un valor imprevisto se
+      // dice «desconocido», no se pinta crudo.
+      'desconocido';
 
   String _alcanceLegible(String alcance) =>
       const {
         'solo_mio': 'solo para mí',
         'todos': 'para todos',
       }[alcance] ??
-      alcance;
+      'desconocido';
 
   Future<void> _crear() async {
     // 1.29 (Oleada 4, barrido): el formulario vive en un
@@ -565,6 +570,14 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
+                              // 136-981: tooltip según la
+                              // acción real del botón.
+                              tooltip: (c['activa'] as num?)?.toInt() ==
+                                          1 &&
+                                      !recordatorioEnPausaConFecha(
+                                          c, hoyHabanaIso())
+                                  ? 'Pausar'
+                                  : 'Reanudar',
                               icon: Icon(
                                   (c['activa'] as num?)?.toInt() == 1 &&
                                           !recordatorioEnPausaConFecha(
@@ -575,6 +588,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                               onPressed: () => _conmutarPausa(c),
                             ),
                             IconButton(
+                              tooltip: 'Eliminar recordatorio',
                               icon: const Icon(Icons.delete_outline_rounded,
                                   size: 20),
                               onPressed: () async {
@@ -599,10 +613,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                                   if (mounted) {
                                     mostrarSnack(
                                         context,
-                                        e
-                                            .toString()
-                                            .replaceFirst(
-                                                'Exception: ', ''),
+                                        mensajeErrorAmable(e),
                                         significado:
                                             SignificadoChip.error);
                                   }
@@ -684,6 +695,7 @@ class _DialogoCrearRecordatorioState
           children: [
             TextField(
                 controller: _tituloCtrl,
+                onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                     labelText: 'Título (p. ej. «Vence esta semana»')),
             const SizedBox(height: 8),
@@ -711,8 +723,13 @@ class _DialogoCrearRecordatorioState
                     setState(() => _alcance = v ?? 'solo_mio'),
               ),
               const Text(
-                'Masivo: solo se dispara en tu teléfono; los demás '
-                'lo ven como ya disparado ese día.',
+                // 1.36 H-C2 (136-979): lo que el sistema
+                // asienta de verdad (recordatorios.dart):
+                // en los demás teléfonos el debido queda
+                // «lo dispara el dueño», no «ya disparado».
+                'Masivo: solo se dispara en tu teléfono; en los '
+                'demás aparece como «lo dispara el dueño» hasta '
+                'que lo dispares.',
                 style: AppTexto.secundario,
               ),
             ] else
@@ -725,7 +742,9 @@ class _DialogoCrearRecordatorioState
             // para vencimiento/cumpleaños; el personalizado usa
             // fecha fija.
             if (_tipo != 'personalizado') ...[
-              Text('Días de anticipación (vencimiento): $_dias'),
+              Text(_tipo == 'cumpleanos'
+                  ? 'Días de anticipación (cumpleaños): $_dias'
+                  : 'Días de anticipación (vencimiento): $_dias'),
               Slider(
                   value: _dias.toDouble(),
                   min: 0,
@@ -782,7 +801,13 @@ class _DialogoCrearRecordatorioState
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         TextButton(
-            onPressed: _crear, child: const Text('Crear')),
+            // 1.36 H-C2 (136-978): sin título no se crea
+            // (antes el diálogo cerraba sin feedback y
+            // el recordatorio nacía sin título o se
+            // perdía el gesto).
+            onPressed:
+                _tituloCtrl.text.trim().isEmpty ? null : _crear,
+            child: const Text('Crear')),
       ],
     );
   }
