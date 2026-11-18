@@ -231,6 +231,10 @@ class _HistorialVentasScreenState
   // (136-764) fallo de carga: EstadoError con reintento, no
   // un «Sin ventas registradas» falso.
   String? _errorCarga;
+  // 1.36 H-B3 (136-765): «Mis ventas» sin identidad resuelta
+  // (telegramId null) no es «Sin ventas»: es un fallo con
+  // nombre y reintento.
+  bool _identidadNoResuelta = false;
   // Resaltado (4/25): id + llave por fila para desplazar a la venta.
   int? _resaltado;
   final _llaves = <int, GlobalKey>{};
@@ -392,6 +396,7 @@ class _HistorialVentasScreenState
     if (!mounted) return;
     setState(() {
       _errorCarga = null;
+      _identidadNoResuelta = widget.soloMias && tid == null;
       _ventas = ventas;
       _productos = mapa;
       _anuladasPendientes = anuladas;
@@ -423,7 +428,13 @@ class _HistorialVentasScreenState
           _scrollCtrl.hasClients) {
         final destino = _posResaltado * 116.0;
         final maximo = _scrollCtrl.position.maxScrollExtent;
-        _scrollCtrl.jumpTo(destino > maximo ? maximo : destino);
+        // 1.36 H-B3 (136-765): el salto estimado va ANIMADO
+        // (animateTo), no con jumpTo brusco; el ajuste fino
+        // lo hace ensureVisible con la medición real del
+        // ítem cuando la fila ya existe.
+        _scrollCtrl.animateTo(destino > maximo ? maximo : destino,
+            duration: AppMovimiento.larga,
+            curve: AppMovimiento.curva);
         WidgetsBinding.instance.addPostFrameCallback(
             (_) => _irAResaltado(intentos + 1));
       }
@@ -543,6 +554,23 @@ class _HistorialVentasScreenState
         onReintentar: () {
           setState(() {
             _errorCarga = null;
+            _cargando = true;
+          });
+          _cargar();
+        },
+      );
+    }
+    // 1.36 H-B3 (136-765): sin identidad no hay «Mis ventas»
+    // que filtrar — se dice como fallo con reintento, no
+    // como un historial vacío sano.
+    if (_identidadNoResuelta) {
+      return EstadoError(
+        titulo: 'No se pudo saber quién eres',
+        detalle: 'Tu sesión no resolvió tu identidad; sin '
+            'ella no se pueden filtrar tus ventas.',
+        onReintentar: () {
+          setState(() {
+            _identidadNoResuelta = false;
             _cargando = true;
           });
           _cargar();
@@ -1108,6 +1136,13 @@ class _DialogoReciboWaState extends State<_DialogoReciboWa> {
           mostrarSnack(context, 'No se pudo abrir WhatsApp',
               significado: SignificadoChip.error);
         }
+      } else if (mounted) {
+        // 1.36 H-B3 (136-765): al enviar, el diálogo se
+        // cierra con su confirmación — antes quedaba abierto
+        // sin decir si el recibo salió.
+        Navigator.pop(context);
+        mostrarSnack(context, 'Recibo enviado por WhatsApp',
+            significado: SignificadoChip.exito);
       }
     } catch (_) {
       if (mounted) {
@@ -1263,6 +1298,10 @@ class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
   late String? _desde = widget.desde;
   late String? _hasta = widget.hasta;
 
+  /// 1.36 H-B3 (136-765): rango imposible (desde > hasta).
+  bool get _rangoInvalido =>
+      _desde != null && _hasta != null && _desde!.compareTo(_hasta!) > 0;
+
   Future<void> _elegirFecha({required bool esDesde}) async {
     final ahora = ahoraHabana();
     final inicial = esDesde ? _desde : _hasta;
@@ -1392,6 +1431,20 @@ class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
                   child: const Text('Limpiar fechas'),
                 ),
               ),
+            // 1.36 H-B3 (136-765): un rango imposible
+            // (desde posterior a hasta) se valida EN la hoja
+            // y bloquea Aplicar — antes la lista quedaba
+            // vacía sin explicación.
+            if (_rangoInvalido)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Text(
+                  'La fecha «desde» es posterior a «hasta»: '
+                  'ese rango no puede dar ventas.',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.errorTexto(context)),
+                ),
+              ),
             const SizedBox(height: AppEspacio.md),
             Row(
               children: [
@@ -1402,16 +1455,21 @@ class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
                     _desde = null;
                     _hasta = null;
                   }),
-                  child: const Text('Limpiar'),
+                  // 1.36 H-B3 (136-765): se llama como lo que
+                  // hace — restablece la copia local; quien
+                  // aplica es «Aplicar».
+                  child: const Text('Restablecer'),
                 ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: () => Navigator.of(context).pop((
-                    productoId: _productoId,
-                    moneda: _moneda,
-                    desde: _desde,
-                    hasta: _hasta,
-                  )),
+                  onPressed: _rangoInvalido
+                      ? null
+                      : () => Navigator.of(context).pop((
+                            productoId: _productoId,
+                            moneda: _moneda,
+                            desde: _desde,
+                            hasta: _hasta,
+                          )),
                   child: const Text('Aplicar'),
                 ),
               ],

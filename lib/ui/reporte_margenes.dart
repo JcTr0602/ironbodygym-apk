@@ -77,6 +77,9 @@ class _ReporteMargenesScreenState
     extends State<ReporteMargenesScreen> {
   List<Map<String, dynamic>> _datos = [];
   bool _cargando = true;
+  // 1.36 H-B3 (136-763): el fallo de carga se pinta con
+  // reintento, no como «Sin productos».
+  String? _errorCarga;
 
   @override
   void initState() {
@@ -90,10 +93,12 @@ class _ReporteMargenesScreenState
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted) setState(() => _errorCarga = null);
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -168,10 +173,40 @@ class _ReporteMargenesScreenState
     }
 
     return Scaffold(
-      appBar: appBarIron(context, 'Márgenes de Suplementos'),
+      appBar: appBarIron(
+        context,
+        'Márgenes de Suplementos',
+        acciones: [
+          // 1.36 H-B3 (136-763): recalcular sin salir — si la
+          // tasa USD cambió en Admin, el reporte se relee aquí.
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Recalcular',
+            onPressed: _cargando
+                ? null
+                : () {
+                    setState(() => _cargando = true);
+                    _cargar();
+                  },
+          ),
+        ],
+      ),
       body: _cargando
-          ? const Center(
-              child: CircularProgressIndicator())
+          // 1.36 H-B3 (136-763): EstadoCargando de la casa,
+          // no el spinner crudo.
+          ? const EstadoCargando(texto: 'Calculando márgenes…')
+          : _errorCarga != null && _datos.isEmpty
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el reporte',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           // F4-16: sin productos activos la pantalla quedaba
           // en blanco como si estuviera rota.
           : _datos.isEmpty
@@ -188,7 +223,13 @@ class _ReporteMargenesScreenState
                   margin: const EdgeInsets.all(AppEspacio.lg),
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   decoration: BoxDecoration(
-                    color: AppColores.fondo(context),
+                    // 1.36 H-B3 (136-763): la tarjeta KPI va
+                    // sobre una superficie DISTINGUIBLE del
+                    // fondo, con borde (antes fondo sobre
+                    // fondo: casi invisible).
+                    color: AppColores.superficie(context),
+                    border:
+                        Border.all(color: AppColores.borde(context)),
                     borderRadius:
                         BorderRadius.circular(AppRadio.md),
                   ),
@@ -208,7 +249,8 @@ class _ReporteMargenesScreenState
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
                       '${_datos.where((r) => r['sin_tasa'] == true).length} producto(s) en CUP sin tasa USD: fuera del total.',
-                      style: AppTexto.metadato.copyWith(color: Colors.grey[500]),
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.textoSecundario(context)),
                     ),
                   ),
                 Expanded(
@@ -256,7 +298,8 @@ class _ReporteMargenesScreenState
                           '${sinTasa ? ' · sin tasa USD' : ''} '
                           '($stock disp.)'
                           '${margenPot != null ? '\nMargen en stock: \$${margenPot.toStringAsFixed(2)} USD' : ''}',
-                          style: AppTexto.metadato.copyWith(color: Colors.grey[400]),
+                          style: AppTexto.metadato.copyWith(
+                              color: AppColores.textoSecundario(ctx)),
                         ),
                         trailing: Column(
                           mainAxisAlignment:
@@ -273,11 +316,14 @@ class _ReporteMargenesScreenState
                               style: TextStyle(
                                 fontWeight:
                                     FontWeight.bold,
+                                // 1.36 H-B3 (136-763): tokens
+                                // de éxito/error de la casa, no
+                                // los acentos crudos de Material.
                                 color: margenUnit == null
-                                    ? Colors.grey
+                                    ? AppColores.textoSecundario(ctx)
                                     : margenUnit > 0
-                                        ? Colors.greenAccent
-                                        : Colors.redAccent,
+                                        ? AppColores.exito
+                                        : AppColores.errorTexto(ctx),
                               ),
                             ),
                             Text(
@@ -303,7 +349,8 @@ class _ReporteMargenesScreenState
             style: AppTexto.titulo),
         const SizedBox(height: 2),
         Text(label,
-            style: AppTexto.metadato.copyWith(color: Colors.grey[500])),
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.textoSecundario(context))),
       ],
     );
   }

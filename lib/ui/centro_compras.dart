@@ -158,6 +158,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   List<Map<String, dynamic>> _filas = [];
   // Suplementos por id: la foto de las filas (T93).
   Map<int, Map<String, dynamic>> _supPorId = {};
+  // 1.36 H-B3 (136-761): el fallo de carga se pinta con
+  // reintento, no como «Sin compras».
+  String? _errorCarga;
 
   @override
   void dispose() {
@@ -188,10 +191,12 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted) setState(() => _errorCarga = null);
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -443,7 +448,21 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           : null,
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando compras…')
-          : RefrescoIron(
+          : _errorCarga != null && _filas.isEmpty
+              // 1.36 H-B3 (136-761): fallo de lectura con
+              // reintento — no «Sin compras».
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el extracto',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : RefrescoIron(
               // 1.34 Campo 2 (P-7): el gesto baja el alcance
               // de servicios si los datos están viejos
               // (regla de Jc) y relee; su vacío va en una
@@ -456,18 +475,32 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
               // ahogaba; ahora la lista manda y la cabecera
               // rueda con ella.
               child: ListView(
+                // 1.36 H-B3 (136-762): hueco inferior para el
+                // FAB extendido (no tapa las últimas filas).
+                padding: const EdgeInsets.only(bottom: 96),
                 children: [
                   _cabecera(),
                   _filtros(),
                   Padding(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     child: _visibles.isEmpty
-                        ? const Padding(
-                            padding: EdgeInsets.only(top: 120),
-                            child: Center(
-                                child: Text(
-                                    'Sin compras para este filtro.',
-                                    style: AppTexto.secundario)),
+                        // 1.36 H-B3 (136-762): vacío
+                        // CONTEXTUAL (período + filtro +
+                        // búsqueda) con salida: limpiar todo.
+                        ? EstadoVacio(
+                            sinMarco: true,
+                            icono: Icons.receipt_long_rounded,
+                            titulo: 'Sin compras',
+                            subtitulo:
+                                'No hay compras $_nombrePeriodo con '
+                                'el filtro y la búsqueda actuales.',
+                            textoAccion: 'Limpiar filtros',
+                            onAccion: () => setState(() {
+                              _filtro = 'todo';
+                              _periodo = 'todo';
+                              _busqueda = '';
+                              _busquedaCtrl.clear();
+                            }),
                           )
                         : Column(
                             children: [
@@ -570,7 +603,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                 f['tipo'] == 'servicio'
                     ? Icons.fitness_center_rounded
                     : Icons.shopping_bag_rounded,
-                color: anulada ? Colors.grey : AppColores.naranja),
+                color: anulada
+                    ? AppColores.textoSecundario(context)
+                    : AppColores.naranja),
         title: Text(
             '${f['concepto']}'
             '${esManual ? ' (manual)' : ''}'
@@ -592,6 +627,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
 
   Future<void> _detalle(Map<String, dynamic> f) async {
     final esManual = f['origen'] == 'manual';
+    // 1.36 H-B3 (136-761): «Ir a la venta» solo se ofrece si
+    // la fila tiene un destino válido — antes el botón salía
+    // siempre y con destino null no hacía nada.
+    final destino = destinoVentaExtracto(f);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -628,9 +667,12 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                   await _anularManual(f['idManual'] as String);
                   _cargar();
                 },
-                child: const Text('Anular con motivo',
-                    style: TextStyle(color: Colors.red))),
-          if (!esManual)
+                child: Text('Anular con motivo',
+                    // 1.36 H-B3 (136-762): token de error
+                    // adaptable, no Colors.red directo.
+                    style:
+                        TextStyle(color: AppColores.errorTexto(ctx)))),
+          if (!esManual && destino != null)
             TextButton(
                 onPressed: () async {
                   Navigator.pop(ctx);
@@ -658,6 +700,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           builder: (_) => HistorialVentasScreen(resaltarId: destino.id),
         ),
       );
+      // 1.36 H-B3 (136-761): al volver del historial se
+      // recarga el extracto (pudo anularse algo allí).
+      if (mounted) _cargar();
       return;
     }
     // Yunque Exhaustivo D-01: nada de barrer `pagos`. Los
@@ -686,6 +731,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         ),
       ),
     );
+    // 1.36 H-B3 (136-761): recarga también al volver del
+    // historial de servicios.
+    if (mounted) _cargar();
   }
 
   Future<void> _anularManual(String id) async {
@@ -694,20 +742,33 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       builder: (ctx) => const _DialogoAnularCompra(),
     );
     if (motivo == null || !mounted) return;
-    final db = await LocalDb.instance.db;
-    await db.transaction((txn) async {
-      await txn.update(
-          'compras',
-          {'anulada': 1, 'motivo_anulacion': motivo},
-          where: 'id=?',
-          whereArgs: [id]);
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'anular_compra',
-        payload: {'id': id, 'motivo': motivo},
-        txn: txn,
-      );
-    });
+    // 1.36 H-B3 (136-761): la anulación va con red — si la
+    // escritura local falla, se avisa y la fila queda como
+    // estaba (antes el diálogo ya había cerrado y el fallo
+    // moría en silencio tras la transacción).
+    try {
+      final db = await LocalDb.instance.db;
+      await db.transaction((txn) async {
+        await txn.update(
+            'compras',
+            {'anulada': 1, 'motivo_anulacion': motivo},
+            where: 'id=?',
+            whereArgs: [id]);
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'anular_compra',
+          payload: {'id': id, 'motivo': motivo},
+          txn: txn,
+        );
+      });
+    } catch (e) {
+      AppLog.error('centro_compras', 'anular_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo anular la compra.',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     if (!mounted) return;
     mostrarSnack(context, 'Compra anulada', significado: SignificadoChip.exito);
     // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
@@ -812,13 +873,28 @@ class _DialogoAnularCompraState extends State<_DialogoAnularCompra> {
   final _motivoCtrl = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    _motivoCtrl.addListener(_repintar);
+  }
+
+  void _repintar() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _motivoCtrl.removeListener(_repintar);
     _motivoCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-B3 (136-761): «Anular» nace DESHABILITADO sin
+    // motivo — antes un motivo vacío devolvía null y se leía
+    // como «canceló», sin aviso.
+    final valido = _motivoCtrl.text.trim().isNotEmpty;
     return DialogoApp(
       titulo: 'Anular compra',
       iconoTitulo: Icons.cancel_rounded,
@@ -832,10 +908,10 @@ class _DialogoAnularCompraState extends State<_DialogoAnularCompra> {
             onPressed: () => Navigator.pop(context, null),
             child: const Text('Cancelar')),
         FilledButton(
-            onPressed: () => Navigator.pop(context,
-                _motivoCtrl.text.trim().isEmpty
-                    ? null
-                    : _motivoCtrl.text.trim()),
+            onPressed: valido
+                ? () => Navigator.pop(
+                    context, _motivoCtrl.text.trim())
+                : null,
             child: const Text('Anular')),
       ],
     );
@@ -917,6 +993,7 @@ class _DialogoRegistrarCompraManualState
             const SizedBox(height: 8),
             TextField(
                 controller: _conceptoCtrl,
+                onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                     labelText: 'Concepto (ej: Whey 2 lb)',
                     border: OutlineInputBorder())),
@@ -944,7 +1021,9 @@ class _DialogoRegistrarCompraManualState
             OutlinedButton.icon(
               icon: const Icon(Icons.calendar_month_rounded,
                   size: 18),
-              label: Text('Fecha: $_fechaSel'),
+              // 1.36 H-B3 (136-762): la fecha se muestra con
+              // fmtFecha, no la ISO cruda.
+              label: Text('Fecha: ${fmtFecha(_fechaSel)}'),
               onPressed: () async {
                 final hoy = ahoraHabana();
                 final elegida = await showDatePicker(
@@ -990,15 +1069,26 @@ class _DialogoRegistrarCompraManualState
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
+        // 1.36 H-B3 (136-762): la validación vive DENTRO del
+        // diálogo — Guardar nace deshabilitado hasta que
+        // concepto y monto son válidos (antes validaba el
+        // llamador tras cerrar y lo escrito se perdía).
         FilledButton(
-            onPressed: () => Navigator.pop(context, (
-                  concepto: _conceptoCtrl.text,
-                  monto: _montoCtrl.text,
-                  fecha: _fechaSel,
-                  tipo: _tipo,
-                  clienteId: _clienteId,
-                  clienteNombre: _clienteNombre,
-                )),
+            onPressed: _conceptoCtrl.text.trim().isNotEmpty &&
+                    (double.tryParse(_montoCtrl.text
+                                .trim()
+                                .replaceAll(',', '.')) ??
+                            0) >
+                        0
+                ? () => Navigator.pop(context, (
+                      concepto: _conceptoCtrl.text,
+                      monto: _montoCtrl.text,
+                      fecha: _fechaSel,
+                      tipo: _tipo,
+                      clienteId: _clienteId,
+                      clienteNombre: _clienteNombre,
+                    ))
+                : null,
             child: const Text('Guardar')),
       ],
     );
@@ -1055,19 +1145,29 @@ class _DialogoElegirClienteComprasState
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: ListView(
-                children: [
-                  for (final c in visibles)
-                    ListTile(
-                      dense: true,
-                      title: Text('${c['nombre'] ?? ''}'),
-                      onTap: () => Navigator.pop(context, (
-                            id: (c['id'] as num?)?.toInt(),
-                            nombre: '${c['nombre'] ?? ''}',
-                          )),
+              // 1.36 H-B3 (136-762): sin coincidencias hay un
+              // estado vacío, no 380 dp en blanco.
+              child: visibles.isEmpty
+                  ? const EstadoVacio(
+                      sinMarco: true,
+                      icono: Icons.search_off_rounded,
+                      titulo: 'Sin coincidencias',
+                      subtitulo:
+                          'Ningún cliente coincide con ese filtro.',
+                    )
+                  : ListView(
+                      children: [
+                        for (final c in visibles)
+                          ListTile(
+                            dense: true,
+                            title: Text('${c['nombre'] ?? ''}'),
+                            onTap: () => Navigator.pop(context, (
+                                  id: (c['id'] as num?)?.toInt(),
+                                  nombre: '${c['nombre'] ?? ''}',
+                                )),
+                          ),
+                      ],
                     ),
-                ],
-              ),
             ),
           ],
         ),
@@ -1120,6 +1220,20 @@ class _FotoExtractoState extends State<_FotoExtracto> {
     return FutureBuilder<File?>(
       future: _futura,
       builder: (ctx, snap) {
+        // 1.36 H-B3 (136-762): el error de foto se distingue
+        // de «sin foto» y la imagen entra con fundido.
+        if (snap.hasError) {
+          return SizedBox(
+            width: 40,
+            height: 40,
+            child: Container(
+              color: AppColores.superficieHundida(ctx),
+              alignment: Alignment.center,
+              child: Icon(Icons.broken_image_rounded,
+                  size: 20, color: AppColores.errorTexto(ctx)),
+            ),
+          );
+        }
         final f = snap.data;
         if (f == null) {
           // SL-6 (G05-13): sin foto, la marca única de la
@@ -1139,6 +1253,19 @@ class _FotoExtractoState extends State<_FotoExtracto> {
             width: 40,
             height: 40,
             fit: BoxFit.cover,
+            frameBuilder: (_, child, frame, __) => AnimatedOpacity(
+              opacity: frame == null ? 0 : 1,
+              duration: AppMovimiento.corta,
+              child: child,
+            ),
+            errorBuilder: (_, __, ___) => Container(
+              width: 40,
+              height: 40,
+              color: AppColores.superficieHundida(ctx),
+              alignment: Alignment.center,
+              child: Icon(Icons.broken_image_rounded,
+                  size: 20, color: AppColores.errorTexto(ctx)),
+            ),
           ),
         );
       },
