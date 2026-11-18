@@ -10,6 +10,10 @@ library;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/bloque3.dart';
+import 'package:ironbody_gym/invitados.dart';
+import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/ui/centro_sync.dart';
 
 String _src(String p) => File(p).readAsStringSync();
@@ -165,6 +169,127 @@ void main() {
       final tramo = s.substring(i, i + 2200);
       expect(tramo, contains('reloj_medicion_fallo'),
           reason: 'el fallo de medición deja su propia marca');
+    });
+  });
+
+  group('136-325: casts duros — el parseo tolerante no tumba '
+      'con datos sucios del espejo/RPC', () {
+    test('InvitadosConteos con conteos como texto', () {
+      final c = InvitadosConteos.fromJson({
+        'total': '12',
+        'plus': '3',
+        'plus_por_vencer': 1.0,
+        'solicitudes': '2',
+        'por_expirar': '0',
+        'nuevos': '5',
+        'caducados': '4',
+        'convertidos': '7',
+      });
+      expect(c.total, 12);
+      expect(c.plus, 3);
+      expect(c.plusPorVencer, 1);
+      expect(c.caducados, 4);
+      expect(c.convertidos, 7);
+    });
+
+    test('PlusDetalle e historial con tipos cruzados', () {
+      final d = PlusDetalle.fromJson({
+        'estado': 'activo',
+        'activo': true,
+        'dias_restantes': '9',
+        'origen': 42,
+        'historial': [
+          {
+            'tipo': 'plus_cortesia',
+            'actor': 7,
+            'motivo': 99,
+            'dias': '30',
+            'monto_cup': '1500.5',
+          },
+        ],
+      });
+      expect(d.diasRestantes, 9);
+      expect(d.origen, '42');
+      expect(d.historial.single.actor, '7');
+      expect(d.historial.single.dias, 30);
+      expect(d.historial.single.montoCup, 1500.5);
+    });
+
+    test('ResultadoLote y ResultadoMedidas con textos', () {
+      final l = ResultadoLote.fromJson({
+        'accion': 'quitar_plus',
+        'aplicados': '2',
+        'omitidos': '1',
+        'fallidos': '0',
+        'items': [
+          {'id': 'x', 'ok': true, 'codigo': 'aplicada', 'motivo': 5},
+        ],
+      });
+      expect(l.aplicados, 2);
+      expect(l.items.single.motivo, '5');
+      final m = ResultadoMedidasInvitado.fromJson({
+        'estado': 'verificadas',
+        'importadas': '3',
+        'duplicadas': '1',
+        'descartadas': '0',
+        'motivo': 12,
+      });
+      expect(m.importadas, 3);
+      expect(m.motivo, '12');
+    });
+
+    test('bloque3 fromMirror con tipos cruzados (GF-116)', () {
+      final a = SolicitudAdelanto.fromMirror({
+        'id': 5,
+        'entrenador_nombre': 111,
+        'monto': '1500',
+        'creado_en': 20261101,
+        'op_uuid': 777,
+      });
+      expect(a.entrenadorNombre, '111');
+      expect(a.monto, 1500);
+      expect(a.opUuid, '777');
+      final r = SolicitudRelleno.fromMirror({
+        'id': 'r1',
+        'suplemento_id': '9',
+        'dosis_al_pedir': '4',
+        'creado_en': 123,
+      });
+      expect(r.suplementoId, 9);
+      expect(r.dosisAlPedir, 4);
+      final v = VistoAviso.fromMirror({
+        'aviso_id': 'a1',
+        'telegram_id': '555',
+        'visto_en': 20261101,
+        'descartado': '1',
+      });
+      expect(v.telegramId, 555);
+      expect(v.descartado, isTrue);
+    });
+
+    test('columnasGuiaEquipos con activo/orden textuales '
+        '(GE-044)', () {
+      final c = LocalDb.columnasGuiaEquipos(
+          {'equipoNombre': 'Press', 'orden': '3', 'activo': 'true'});
+      expect(c['orden'], 3);
+      expect(c['activo'], 1);
+      final c2 = LocalDb.columnasGuiaEquipos(
+          {'equipoNombre': 'Press', 'orden': 2.0, 'activo': 'false'});
+      expect(c2['orden'], 2);
+      expect(c2['activo'], 0);
+    });
+
+    test('textoEstadoCuenta con cuenta_casa bool y '
+        'pagado_hasta no-texto (GF-085)', () {
+      final txt = textoEstadoCuenta(
+        cliente: {'nombre': 'Ana', 'cuenta_casa': true},
+        pagos: const [],
+        ventas: const [],
+        servicios: const [],
+        fiadoPendiente: const {},
+        hoyIso: '2026-11-18',
+      );
+      expect(txt, contains('Cuenta a la Casa'));
     });
   });
 

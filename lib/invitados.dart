@@ -96,6 +96,13 @@ double? _num(dynamic v) {
 /// 1.28 (M4-A11/R3M4-H2): tolerancia de tipos en los modelos
 /// de invitados. Los casts duros (`as num?`, `as String?`)
 /// lanzaban con una fila sucia y tumbaban la lista ENTERA.
+/// 1.36 (136-325): la migración queda TERMINADA en este
+/// archivo — Conteos, PlusDetalle/PlusHistorialItem,
+/// ResultadoLote/ItemLote, SolicitudInvitado,
+/// ConversionServidor/ConversionInvitado y
+/// ResultadoMedidasInvitado ya parsean solo con estos
+/// helpers; ningún `as num?`/`as String?` queda sobre datos
+/// del RPC en invitados.dart.
 int? _enteroTolerante(dynamic v) {
   if (v is num) return v.toInt();
   if (v is String) return int.tryParse(v.trim());
@@ -338,14 +345,14 @@ class InvitadosConteos {
   });
   factory InvitadosConteos.fromJson(Map<String, dynamic> j) =>
       InvitadosConteos(
-        total: (j['total'] as num?)?.toInt() ?? 0,
-        plus: (j['plus'] as num?)?.toInt() ?? 0,
-        plusPorVencer: (j['plus_por_vencer'] as num?)?.toInt() ?? 0,
-        solicitudes: (j['solicitudes'] as num?)?.toInt() ?? 0,
-        porExpirar: (j['por_expirar'] as num?)?.toInt() ?? 0,
-        nuevos: (j['nuevos'] as num?)?.toInt() ?? 0,
-        caducados: (j['caducados'] as num?)?.toInt(),
-        convertidos: (j['convertidos'] as num?)?.toInt(),
+        total: _enteroTolerante(j['total']) ?? 0,
+        plus: _enteroTolerante(j['plus']) ?? 0,
+        plusPorVencer: _enteroTolerante(j['plus_por_vencer']) ?? 0,
+        solicitudes: _enteroTolerante(j['solicitudes']) ?? 0,
+        porExpirar: _enteroTolerante(j['por_expirar']) ?? 0,
+        nuevos: _enteroTolerante(j['nuevos']) ?? 0,
+        caducados: _enteroTolerante(j['caducados']),
+        convertidos: _enteroTolerante(j['convertidos']),
       );
   Map<String, dynamic> toJson() => {
         'total': total,
@@ -382,11 +389,11 @@ class PlusHistorialItem {
       PlusHistorialItem(
         tipo: '${j['tipo'] ?? ''}',
         fecha: _ts(j['fecha']),
-        actor: j['actor'] as String?,
-        motivo: j['motivo'] as String?,
+        actor: _textoTolerante(j['actor']),
+        motivo: _textoTolerante(j['motivo']),
         hasta: _ts(j['hasta']),
-        dias: (j['dias'] as num?)?.toInt(),
-        montoCup: (j['monto_cup'] as num?)?.toDouble(),
+        dias: _enteroTolerante(j['dias']),
+        montoCup: _num(j['monto_cup']),
       );
 }
 
@@ -419,8 +426,8 @@ class PlusDetalle {
       activo: j['activo'] == true,
       desde: _ts(j['desde']),
       hasta: _ts(j['hasta']),
-      diasRestantes: (j['dias_restantes'] as num?)?.toInt(),
-      origen: j['origen'] as String?,
+      diasRestantes: _enteroTolerante(j['dias_restantes']),
+      origen: _textoTolerante(j['origen']),
       historial: [
         for (final h in hist)
           if (h is Map)
@@ -447,7 +454,7 @@ class AccionStaffInvitado {
     final d = j['detalle'];
     return AccionStaffInvitado(
       accion: '${j['accion'] ?? ''}',
-      actor: j['actor'] as String?,
+      actor: _textoTolerante(j['actor']),
       fecha: _ts(j['fecha']),
       detalle: d is Map ? d.map((k, v) => MapEntry('$k', v)) : const {},
     );
@@ -475,7 +482,7 @@ class ItemLote {
         id: '${j['id'] ?? ''}',
         ok: j['ok'] == true,
         codigo: '${j['codigo'] ?? ''}',
-        motivo: j['motivo'] as String?,
+        motivo: _textoTolerante(j['motivo']),
         plusHasta: _ts(j['plus_hasta']),
         caducaEn: _ts(j['caduca_en']),
       );
@@ -505,9 +512,9 @@ class ResultadoLote {
     final items = itemsRaw is List ? itemsRaw : const [];
     return ResultadoLote(
       accion: '${j['accion'] ?? ''}',
-      aplicados: (j['aplicados'] as num?)?.toInt() ?? 0,
-      omitidos: (j['omitidos'] as num?)?.toInt() ?? 0,
-      fallidos: (j['fallidos'] as num?)?.toInt() ?? 0,
+      aplicados: _enteroTolerante(j['aplicados']) ?? 0,
+      omitidos: _enteroTolerante(j['omitidos']) ?? 0,
+      fallidos: _enteroTolerante(j['fallidos']) ?? 0,
       repetida: j['repetida'] == true,
       items: [
         for (final i in items)
@@ -537,8 +544,8 @@ class SolicitudInvitado {
       estado: '${j['estado'] ?? ''}',
       creadaEn: _ts(j['creada_en']),
       atendidaEn: _ts(j['atendida_en']),
-      atendidoPor: j['atendido_por'] as String?,
-      resultado: j['resultado'] as String?,
+      atendidoPor: _textoTolerante(j['atendido_por']),
+      resultado: _textoTolerante(j['resultado']),
     );
   }
   bool get pendiente => estado == 'pendiente';
@@ -562,7 +569,7 @@ class ConversionServidor {
   factory ConversionServidor.fromJson(Map<String, dynamic> j) {
     return ConversionServidor(
       conversionUuid: '${j['conversion_uuid'] ?? ''}',
-      preparadaPor: j['preparada_por'] as String?,
+      preparadaPor: _textoTolerante(j['preparada_por']),
       preparadaEn: _ts(j['preparada_en']),
       expiraLockEn: _ts(j['expira_lock_en']),
       lockVigente: j['lock_vigente'] == true,
@@ -717,10 +724,10 @@ class ResultadoMedidasInvitado {
   factory ResultadoMedidasInvitado.fromJson(Map<String, dynamic> j) {
     return ResultadoMedidasInvitado(
       estado: '${j['estado'] ?? 'no_verificadas'}',
-      importadas: (j['importadas'] as num?)?.toInt() ?? 0,
-      duplicadas: (j['duplicadas'] as num?)?.toInt() ?? 0,
-      descartadas: (j['descartadas'] as num?)?.toInt() ?? 0,
-      motivo: j['motivo'] as String?,
+      importadas: _enteroTolerante(j['importadas']) ?? 0,
+      duplicadas: _enteroTolerante(j['duplicadas']) ?? 0,
+      descartadas: _enteroTolerante(j['descartadas']) ?? 0,
+      motivo: _textoTolerante(j['motivo']),
     );
   }
 
@@ -940,13 +947,13 @@ class ConversionInvitado {
         (e) => e.name == '${j['estado'] ?? ''}',
         orElse: () => EstadoConversion.preparada,
       ),
-      opUuid: j['op_uuid'] as String?,
-      clienteId: (j['cliente_id'] as num?)?.toInt(),
+      opUuid: _textoTolerante(j['op_uuid']),
+      clienteId: _enteroTolerante(j['cliente_id']),
       resultadoMedidas: rm is Map
           ? ResultadoMedidasInvitado.fromJson(
               rm.map((k, v) => MapEntry('$k', v)))
           : null,
-      errorConfirmacion: j['error_confirmacion'] as String?,
+      errorConfirmacion: _textoTolerante(j['error_confirmacion']),
       nacidaOffline: j['nacida_offline'] == true,
       creadaEn: '${j['creada_en'] ?? ''}',
       actualizadaEn: '${j['actualizada_en'] ?? ''}',
@@ -1121,7 +1128,7 @@ DatosOpConversion? datosConversionDeOp(Map<String, dynamic> fila) {
     invitadoId: inv,
     conversionUuid: conv,
     opUuid: uuid,
-    creadaTs: fila['creada_ts'] as String?,
+    creadaTs: _textoTolerante(fila['creada_ts']),
     nacidaOffline: payload['conversion_nacida_offline'] == true,
   );
 }
@@ -1663,7 +1670,7 @@ class InvitadosService {
   Future<int> atenderSolicitud(String invitadoId) async {
     final res = await _rpc(
         'invitado_atender_solicitud', {'p_invitado_id': invitadoId});
-    return res is Map ? ((res['atendidas'] as num?)?.toInt() ?? 0) : 0;
+    return res is Map ? (_enteroTolerante(res['atendidas']) ?? 0) : 0;
   }
 
   /// B2 (Bloque 3): rechazar la solicitud con motivo registrado.
@@ -1685,7 +1692,7 @@ class InvitadosService {
     });
     if (res is! Map) return false;
     if (res['ok'] == false) return false;
-    final n = (res['rechazadas'] as num?)?.toInt();
+    final n = _enteroTolerante(res['rechazadas']);
     // Sin contador en la respuesta, una respuesta sin error es éxito.
     return n == null ? true : n > 0;
   }
@@ -1703,7 +1710,7 @@ class InvitadosService {
       final n = res['purgados'] ?? res['eliminados'] ?? res['borrados'];
       return (
         ok: res['ok'] != false,
-        purgados: (n as num?)?.toInt() ?? 0,
+        purgados: _enteroTolerante(n) ?? 0,
       );
     }
     // Yunque R3-M6-7c: respuesta malformada de una op
@@ -1734,7 +1741,7 @@ class InvitadosService {
       conversionUuid: '${m['conversion_uuid'] ?? ''}',
       nombre: '${pf['nombre'] ?? detalle.nombre}',
       telefono: '${pf['telefono'] ?? detalle.telefono}',
-      fechaNac: pf['fecha_nac'] as String? ?? detalle.fechaNac,
+      fechaNac: _textoTolerante(pf['fecha_nac']) ?? detalle.fechaNac,
       carnet: detalle.carnet,
       medidas: detalle.mediciones,
     );
@@ -2237,7 +2244,7 @@ class InvitadosService {
       }
       final accion = accionParaConversion(
         conv: conv,
-        opEstado: op['estado'] as String?,
+        opEstado: _textoTolerante(op['estado']),
         opResultado: resultado,
       );
       if (accion == AccionConversion.confirmarEnServidor) {

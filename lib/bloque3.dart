@@ -35,6 +35,27 @@ import 'tiempo.dart';
 // al getter plusPorVencerPronto) para no duplicar el número.
 // ---------------------------------------------------------------------------
 
+/// 1.36 (136-325, GF-116): parseo tolerante para los
+/// fromMirror de este archivo. Los datos del espejo pueden
+/// traer un número como texto (o un texto como número) y el
+/// cast duro (`as String?`, `as num?`) tumbaba la pantalla
+/// entera con UNA fila sucia — la misma clase que la
+/// migración de invitados.dart ya cerró allí.
+String? _textoTolB3(dynamic v) =>
+    v == null ? null : (v is String ? v : '$v');
+
+int? _enteroTolB3(dynamic v) {
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v.trim());
+  return null;
+}
+
+double? _numTolB3(dynamic v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v.trim());
+  return null;
+}
+
 /// E3: aviso si la cola lleva 6 horas o más sin subir.
 const int kHorasAvisoSinSubir = 6;
 
@@ -334,11 +355,11 @@ class AvisoEntrenador {
       titulo: '${m['titulo'] ?? 'Aviso del dueño'}',
       mensaje: '${m['mensaje'] ?? ''}',
       modo: '${m['modo'] ?? 'una_vez'}',
-      activo: (m['activo'] as num?)?.toInt() != 0 &&
+      activo: _enteroTolB3(m['activo']) != 0 &&
           '${m['activo'] ?? ''}' != '0' &&
           m['activo'] != false,
-      vigenteDesde: fecha((m['vigente_desde'] ?? m['inicia_en']) as String?),
-      vigenteHasta: fecha((m['vigente_hasta'] ?? m['termina_en']) as String?),
+      vigenteDesde: fecha(_textoTolB3(m['vigente_desde'] ?? m['inicia_en'])),
+      vigenteHasta: fecha(_textoTolB3(m['vigente_hasta'] ?? m['termina_en'])),
       destinatarioTelegramId: dest,
     );
   }
@@ -415,10 +436,10 @@ class VistoAviso {
       avisoId: '${m['aviso_id'] ?? ''}',
       telegramId: tel ?? 0,
       nombreServidor: '${m['nombre'] ?? ''}',
-      vistoEn: (m['visto_en'] as String?)?.isEmpty ?? true
+      vistoEn: (_textoTolB3(m['visto_en'])?.isEmpty ?? true)
           ? null
-          : m['visto_en'] as String?,
-      descartado: (m['descartado'] as num?)?.toInt() == 1 ||
+          : _textoTolB3(m['visto_en']),
+      descartado: _enteroTolB3(m['descartado']) == 1 ||
           '${m['descartado'] ?? ''}' == '1' ||
           m['descartado'] == true,
     );
@@ -690,20 +711,20 @@ class SolicitudAdelanto {
       id: '${m['id'] ?? ''}',
       entrenadorTelegramId: LocalDb.normalizarTelegramId(
           m['entrenador_telegram_id'] ?? m['telegram_id']),
-      entrenadorNombre: m['entrenador_nombre'] as String?,
-      entrenador: m['entrenador'] as String?,
-      monto: (m['monto'] as num?)?.toDouble() ?? 0,
+      entrenadorNombre: _textoTolB3(m['entrenador_nombre']),
+      entrenador: _textoTolB3(m['entrenador']),
+      monto: _numTolB3(m['monto']) ?? 0,
       motivo: '${m['motivo'] ?? ''}',
       estado: '${m['estado'] ?? 'pendiente'}',
-      creadoEn: m['creado_en'] as String?,
-      resueltoEn: m['resuelto_en'] as String?,
+      creadoEn: _textoTolB3(m['creado_en']),
+      resueltoEn: _textoTolB3(m['resuelto_en']),
       resueltoPor: m['resuelto_por'] != null
           ? '${m['resuelto_por']}'
           : null,
-      resueltoPorNombre: m['resuelto_por_nombre'] as String?,
-      motivoResolucion: m['motivo_resolucion'] as String?,
-      destinoResolucion: m['destino_resolucion'] as String?,
-      opUuid: m['op_uuid'] as String?,
+      resueltoPorNombre: _textoTolB3(m['resuelto_por_nombre']),
+      motivoResolucion: _textoTolB3(m['motivo_resolucion']),
+      destinoResolucion: _textoTolB3(m['destino_resolucion']),
+      opUuid: _textoTolB3(m['op_uuid']),
     );
   }
 
@@ -1076,14 +1097,14 @@ class SolicitudRelleno {
       id: '${m['id'] ?? ''}',
       entrenadorTelegramId: LocalDb.normalizarTelegramId(
           m['entrenador_telegram_id'] ?? m['telegram_id']),
-      entrenadorNombre: m['entrenador_nombre'] as String?,
-      suplementoId: (m['suplemento_id'] as num?)?.toInt(),
-      suplementoNombre: m['suplemento_nombre'] as String?,
+      entrenadorNombre: _textoTolB3(m['entrenador_nombre']),
+      suplementoId: _enteroTolB3(m['suplemento_id']),
+      suplementoNombre: _textoTolB3(m['suplemento_nombre']),
       estado: '${m['estado'] ?? 'pendiente'}',
-      motivoCierre: m['motivo_cierre'] as String?,
-      creadoEn: m['creado_en'] as String?,
-      resueltoEn: m['resuelto_en'] as String?,
-      dosisAlPedir: (m['dosis_al_pedir'] as num?)?.toInt(),
+      motivoCierre: _textoTolB3(m['motivo_cierre']),
+      creadoEn: _textoTolB3(m['creado_en']),
+      resueltoEn: _textoTolB3(m['resuelto_en']),
+      dosisAlPedir: _enteroTolB3(m['dosis_al_pedir']),
     );
   }
 

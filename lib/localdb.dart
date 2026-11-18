@@ -2052,6 +2052,15 @@ class LocalDb {
     return int.tryParse(v.toString().trim());
   }
 
+  /// 1.36 (136-325): importe tolerante del espejo — un
+  /// número como texto vale; otra cosa, null (el llamador
+  /// decide su respaldo, nunca un cast que lance).
+  static double? _montoTol(dynamic v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim());
+    return null;
+  }
+
   /// v1.3.4 (ítem 2): extrae las columnas indexadas del espejo `pagos`
   /// desde el Map ya decodificado en Dart, sin depender del módulo
   /// JSON1 del teléfono. Se usa en los dos caminos de escritura
@@ -2445,11 +2454,22 @@ class LocalDb {
   /// explícito (D-1) y los métodos lo exponen como equipoId.
   static Map<String, Object?> columnasGuiaEquipos(
       Map<String, dynamic> data) {
-    final orden = (data['orden'] as num?)?.toInt() ?? 0;
+    // 1.36 (136-325, GE-044): parseo tolerante — `orden` o
+    // `activo` como texto ('3', '1') lanzaban con el cast
+    // duro y la fila del pull entraba sin columnas (o el
+    // backfill moría); un activo textual 'true'/'false'
+    // tampoco es un num.
+    final orden = normalizarTelegramId(data['orden']) ?? 0;
     final activoRaw = data['activo'];
     final activo = activoRaw is bool
         ? (activoRaw ? 1 : 0)
-        : (activoRaw as num?)?.toInt() ?? 1;
+        : activoRaw is String
+            ? (activoRaw.trim() == 'true'
+                ? 1
+                : activoRaw.trim() == 'false'
+                    ? 0
+                    : int.tryParse(activoRaw.trim()) ?? 1)
+            : normalizarTelegramId(activoRaw) ?? 1;
     return {
       'equipoNombre': '${data['equipoNombre'] ?? ''}',
       'orden': orden,
@@ -2571,14 +2591,19 @@ class LocalDb {
       final saldado =
           v['fiado_saldado'] == 1 || v['fiado_saldado'] == true;
       if (saldado) continue;
-      final deudor = (v['fiado_cliente_id'] as num?)?.toInt() ??
-          (v['cliente_id'] as num?)?.toInt();
+      // 1.36 (136-325, GE-044): ids e importes tolerantes
+      // (normalizarTelegramId / _montoTol): un id o un total
+      // como texto lanzaba y el fiado del cliente salía
+      // incompleto en silencio (el llamador lo pintaba como
+      // «sin fiado»).
+      final deudor = normalizarTelegramId(v['fiado_cliente_id']) ??
+          normalizarTelegramId(v['cliente_id']);
       if (deudor != clienteId) continue;
       final moneda = monedaDe(v);
-      final totalCol = (v['total'] as num?)?.toDouble();
+      final totalCol = _montoTol(v['total']);
       final monto = totalCol ??
-          ((v['precio'] as num?)?.toDouble() ?? 0) *
-              ((v['cantidad'] as num?)?.toInt() ?? 0);
+          ((_montoTol(v['precio']) ?? 0) *
+              (normalizarTelegramId(v['cantidad']) ?? 0));
       tot[moneda] = (tot[moneda] ?? 0) + monto;
     }
     return tot;

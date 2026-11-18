@@ -3901,9 +3901,15 @@ String textoEstadoCuenta({
     ..writeln('Fecha: ${fmtFecha(hoyIso)}')
     ..writeln()
     ..writeln('*Vigencia*');
-  final casa =
-      (cliente['cuenta_casa'] as num?)?.toInt() == 1;
-  final hasta = cliente['pagado_hasta'] as String?;
+  // 1.36 (136-325, GF-085): la fila del espejo puede traer
+  // cuenta_casa como bool/texto y pagado_hasta como no-texto;
+  // el cast duro tumbaba el estado de cuenta entero.
+  final casaRaw = cliente['cuenta_casa'];
+  final casa = casaRaw == true ||
+      casaRaw == 1 ||
+      '${casaRaw ?? ''}'.trim() == '1';
+  final hastaRaw = cliente['pagado_hasta'];
+  final hasta = hastaRaw == null ? null : '$hastaRaw';
   if (casa) {
     b.writeln('Cuenta a la Casa: sin vencimiento.');
   } else if (hasta == null || hasta.isEmpty) {
