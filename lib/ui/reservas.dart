@@ -278,6 +278,44 @@ Set<int> reservasConOpPendiente(List<Map<String, dynamic>> ops) {
   return ids;
 }
 
+/// 1.36 H-B3 (136-746): reservas cuya op encolada está en
+/// ERROR, con el detalle guardado en la cola. La tarjeta las
+/// distingue de las pendientes: chip de error con salida
+/// (detalle + reintento) en vez de «sincronizando» eterno.
+Map<int, String> erroresOpsReserva(List<Map<String, dynamic>> ops) {
+  final errores = <int, String>{};
+  for (final op in ops) {
+    if (!tiposOpReserva.contains(op['tipo'])) continue;
+    if ('${op['estado'] ?? ''}' != 'error') continue;
+    try {
+      final payload = jsonDecode(op['payload'] as String) as Map;
+      final rid = _entero(payload['reserva_id']);
+      if (rid > 0) {
+        final detalle = '${op['error'] ?? ''}'.trim();
+        errores[rid] =
+            detalle.isEmpty ? 'Sin detalle del error.' : detalle;
+      }
+    } catch (_) {
+      // Payload ilegible: no se inventa un error.
+    }
+  }
+  return errores;
+}
+
+/// 1.36 H-B3 (136-749): las solicitadas VENCIDAS se separan
+/// de las vigentes — la bandeja las pone arriba con su
+/// conteo, no mezcladas en FIFO entre las válidas.
+({List<ReservaVista> vencidas, List<ReservaVista> vigentes})
+    partirSolicitadasVencidas(
+        List<ReservaVista> solicitadas, DateTime ahora) {
+  final vencidas = <ReservaVista>[];
+  final vigentes = <ReservaVista>[];
+  for (final r in solicitadas) {
+    (r.solicitudVencida(ahora) ? vencidas : vigentes).add(r);
+  }
+  return (vencidas: vencidas, vigentes: vigentes);
+}
+
 /// Texto de vencimiento de un apartado/solicitud.
 /// 1.32 (Oleada 2, Fase 3 — Momento 2C del plano): la
 /// reserva VIVA de un cliente para el aviso de su
@@ -341,6 +379,9 @@ String textoVenceEn(String? expiraEnIso, DateTime ahora) {
     return 'Vence en $d d${h > 0 ? ' $h h' : ''}';
   }
   if (dif.inHours >= 1) return 'Vence en ${dif.inHours} h';
+  // 1.36 H-B3 (136-748): bajo un minuto no se dice
+  // «Vence en 0 min»: vence ya.
+  if (dif.inMinutes < 1) return 'Vence ya';
   return 'Vence en ${dif.inMinutes} min';
 }
 
@@ -359,7 +400,9 @@ String etiquetaEstadoReserva(String estado) {
     case 'expirada':
       return 'Expirada';
     default:
-      return estado;
+      // 1.36 H-B3 (136-748): un estado que el servidor
+      // invente mañana no se pinta crudo en la tarjeta.
+      return 'Estado desconocido';
   }
 }
 
@@ -439,6 +482,16 @@ class _ReservasScreenState extends State<ReservasScreen> {
   // (1.36 H-A2 136-741) fallo de la carga: no se pinta como
   // bandeja vacía sana.
   String? _errorCarga;
+  // 1.36 H-B3 (136-746): detalle de error por reserva cuya
+  // op encolada está en error (distinto de «sincronizando»).
+  Map<int, String> _erroresOp = {};
+  // 1.36 H-B3 (136-749): refresco en curso (spinner + bloqueo
+  // de toques múltiples), hora de la última sincronización
+  // buena y búsqueda/filtro de la bandeja.
+  bool _refrescando = false;
+  DateTime? _ultimaSync;
+  String _busqueda = '';
+  String _filtro = 'todas';
 
   bool get _puedeAcceder =>
       widget.accesoPermitido ??
@@ -490,59 +543,75 @@ class _ReservasScreenState extends State<ReservasScreen> {
       _bandeja = construirBandeja(reservas, clientes, suplementos,
           esDueno: AuthService().isOwner);
       _conOpPendiente = reservasConOpPendiente(ops);
+      _erroresOp = erroresOpsReserva(ops);
       _errorCarga = null;
       _cargando = false;
     });
   }
 
-  Future<void> _refrescar() async {
+  Future<void> _refrescar({bool silencioso = false}) async {
     // 1.34 Campo 2 (P-7): el gesto dice la verdad y sigue
     // la regla de Jc. Fresco (≤10 min) → solo relectura
     // local. Viejo → alcance detallado y se anuncia el
     // desenlace (bajó / al día / sin conexión / no corrió
     // / parcial), como en Buscar y en Admin; antes se
     // tragaba el resultado booleano y callaba siempre.
-    ResultadoScopeDetallado? r;
-    var lanzo = false;
+    // 1.36 H-B3 (136-745/749): [silencioso] suprime el snack
+    // del desenlace — tras encolar una acción, el snack que
+    // manda es el de la acción, no el del refresco que la
+    // sigue. Y el refresco se guarda contra toques múltiples
+    // y pinta su spinner en la barra.
+    if (_refrescando) return;
+    if (mounted) setState(() => _refrescando = true);
     try {
-      r = await refrescoScopeIron('suplementos');
-    } catch (_) {
-      lanzo = true;
-    }
-    await _cargar();
-    if (!mounted) return;
-    if (lanzo) {
-      mostrarSnack(context,
-          // 1.36 H-B1 (136-319): el fallo de refresco no
-          // siempre es la conexión — mensaje neutro.
-          'No se pudo actualizar: mostrando datos locales',
-          significado: SignificadoChip.alerta);
-    } else if (r == null) {
-      mostrarSnack(context, 'Reservas al día, sin cambios',
-          significado: SignificadoChip.exito);
-    } else if (!r.corrio) {
-      mostrarSnack(
-          context,
-          r.motivo == SyncMotivoNoCorrio.sinSesion
-              ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
-              : 'Ya hay una sincronización en curso',
-          significado: SignificadoChip.alerta);
-    } else if (r.error) {
-      mostrarSnack(context,
-          // 1.36 H-B1 (136-319): el fallo de refresco no
-          // siempre es la conexión — mensaje neutro.
-          'No se pudo actualizar: mostrando datos locales',
-          significado: SignificadoChip.alerta);
-    } else if (r.parcial) {
-      mostrarSnack(context,
-          'Bajada parcial: ${r.fallidas} filas no bajaron; mostrando lo que hay',
-          significado: SignificadoChip.alerta);
-    } else if (r.bajados == 0) {
-      mostrarSnack(context, 'Reservas al día, sin cambios',
-          significado: SignificadoChip.exito);
-    } else {
-      mostrarSnack(context, 'Reservas actualizadas',
-          significado: SignificadoChip.exito);
+      ResultadoScopeDetallado? r;
+      var lanzo = false;
+      try {
+        r = await refrescoScopeIron('suplementos');
+      } catch (_) {
+        lanzo = true;
+      }
+      await _cargar();
+      if (!mounted) return;
+      if (!lanzo && (r == null || (r.corrio && !r.error))) {
+        setState(() => _ultimaSync = ahoraHabana());
+      }
+      if (silencioso) return;
+      if (lanzo) {
+        mostrarSnack(context,
+            // 1.36 H-B1 (136-319): el fallo de refresco no
+            // siempre es la conexión — mensaje neutro.
+            'No se pudo actualizar: mostrando datos locales',
+            significado: SignificadoChip.alerta);
+      } else if (r == null) {
+        mostrarSnack(context, 'Reservas al día, sin cambios',
+            significado: SignificadoChip.exito);
+      } else if (!r.corrio) {
+        mostrarSnack(
+            context,
+            r.motivo == SyncMotivoNoCorrio.sinSesion
+                ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
+                : 'Ya hay una sincronización en curso',
+            significado: SignificadoChip.alerta);
+      } else if (r.error) {
+        mostrarSnack(context,
+            // 1.36 H-B1 (136-319): el fallo de refresco no
+            // siempre es la conexión — mensaje neutro.
+            'No se pudo actualizar: mostrando datos locales',
+            significado: SignificadoChip.alerta);
+      } else if (r.parcial) {
+        mostrarSnack(context,
+            'Bajada parcial: ${r.fallidas} filas no bajaron; mostrando lo que hay',
+            significado: SignificadoChip.alerta);
+      } else if (r.bajados == 0) {
+        mostrarSnack(context, 'Reservas al día, sin cambios',
+            significado: SignificadoChip.exito);
+      } else {
+        mostrarSnack(context, 'Reservas actualizadas',
+            significado: SignificadoChip.exito);
+      }
+    } finally {
+      if (mounted) setState(() => _refrescando = false);
     }
   }
 
@@ -636,7 +705,10 @@ class _ReservasScreenState extends State<ReservasScreen> {
       _conOpPendiente = {..._conOpPendiente, rid};
     });
     mostrarSnack(context, mensajeOk, significado: SignificadoChip.exito);
-    await _refrescar();
+    // 1.36 H-B3 (136-745): el refresco que sigue a encolar
+    // va SILENCIOSO: su snack tapaba el que confirma la
+    // acción que el usuario acaba de hacer.
+    await _refrescar(silencioso: true);
   }
 
   Future<void> _confirmar(ReservaVista r) async {
@@ -763,8 +835,11 @@ class _ReservasScreenState extends State<ReservasScreen> {
               if (avisoMoneda != null)
                 Text(
                   avisoMoneda,
+                  // 1.36 H-B3 (136-748): un aviso informativo
+                  // de precio va con token de ALERTA, no con el
+                  // color de error del esquema.
                   style: TextStyle(
-                      color: Theme.of(ctx).colorScheme.error),
+                      color: AppColores.alertaTexto(ctx)),
                 ),
               if (dif != null && dif != 0)
                 Text(
@@ -772,7 +847,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
                   '${dif > 0 ? '+' : ''}${fmtMonto(dif)} ${r.moneda} de '
                   'diferencia. Se cobra el de la reserva.',
                   style: TextStyle(
-                      color: Theme.of(ctx).colorScheme.error),
+                      color: AppColores.alertaTexto(ctx)),
                 ),
               const SizedBox(height: 12),
               SegmentedButton<String>(
@@ -828,28 +903,65 @@ class _ReservasScreenState extends State<ReservasScreen> {
     if (!_puedeAcceder) {
       return Scaffold(
         appBar: appBarIron(context, 'Reservas'),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(AppEspacio.xl),
-            child: Text(
-              'No tienes permiso para ver las reservas.\n'
+        // 1.36 H-B3 (136-748): el acceso denegado es un
+        // EstadoVacio de la casa, no un texto centrado crudo.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'No tienes permiso para ver las reservas',
+          subtitulo:
               'Pídele al dueño que te active «Vender suplementos».',
-              textAlign: TextAlign.center,
-            ),
-          ),
         ),
       );
     }
     final b = _bandeja;
+    // 1.36 H-B3 (136-749): búsqueda + filtro de estado y las
+    // solicitadas vencidas separadas arriba con su conteo.
+    final ahoraB = ahoraHabana();
+    bool coincideBusqueda(ReservaVista r) {
+      final q = _busqueda.trim().toLowerCase();
+      if (q.isEmpty) return true;
+      return r.clienteNombre.toLowerCase().contains(q) ||
+          r.suplementoNombre.toLowerCase().contains(q);
+    }
+
+    final partidas = b == null
+        ? (vencidas: <ReservaVista>[], vigentes: <ReservaVista>[])
+        : partirSolicitadasVencidas(
+            b.solicitadas.where(coincideBusqueda).toList(), ahoraB);
+    final vencidasF = partidas.vencidas;
+    final solicitadasF = partidas.vigentes;
+    final reservadasF = b == null
+        ? <ReservaVista>[]
+        : b.reservadas.where(coincideBusqueda).toList();
+    final historialF = b == null
+        ? <ReservaVista>[]
+        : b.historial.where(coincideBusqueda).toList();
+    final verSolicitadas = _filtro == 'todas' || _filtro == 'solicitadas';
+    final verReservadas = _filtro == 'todas' || _filtro == 'reservadas';
+    final verHistorial = _filtro == 'todas' || _filtro == 'historial';
+    final nadaVisible = b != null &&
+        !(verSolicitadas &&
+                (vencidasF.isNotEmpty || solicitadasF.isNotEmpty)) &&
+        !(verReservadas && reservadasF.isNotEmpty) &&
+        !(verHistorial && historialF.isNotEmpty);
     return Scaffold(
       appBar: appBarIron(
         context,
         'Reservas',
         acciones: [
+          // 1.36 H-B3 (136-749): durante el refresco el botón
+          // muestra el spinner y se deshabilita (antes no
+          // había feedback ni bloqueo de toques).
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: _refrescando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
             tooltip: 'Sincronizar',
-            onPressed: _refrescar,
+            onPressed: _refrescando ? null : () => _refrescar(),
           ),
         ],
       ),
@@ -886,7 +998,13 @@ class _ReservasScreenState extends State<ReservasScreen> {
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      const SizedBox(height: 120),
+                      // 1.36 H-B3 (136-748): el vacío se centra
+                      // con un margen PROPORCIONAL a la pantalla,
+                      // no con un SizedBox fijo de 120 que lo
+                      // empujaba fuera del área cómoda.
+                      SizedBox(
+                          height:
+                              MediaQuery.sizeOf(context).height * 0.16),
                       EstadoVacio(
                         icono: Icons.event_available_rounded,
                         titulo: 'Todavía no hay reservas.',
@@ -904,37 +1022,121 @@ class _ReservasScreenState extends State<ReservasScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(AppEspacio.md),
                     children: [
-                      if (b.solicitadas.isNotEmpty) ...[
+                      // 1.36 H-B3 (136-749): buscador, chips de
+                      // estado y hora de última sincronización
+                      // sobre la bandeja.
+                      TextField(
+                        decoration: const InputDecoration(
+                          hintText: 'Buscar por cliente o suplemento',
+                          prefixIcon: Icon(Icons.search_rounded),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (v) =>
+                            setState(() => _busqueda = v),
+                      ),
+                      const SizedBox(height: AppEspacio.sm),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (final (valor, etiqueta) in const [
+                              ('todas', 'Todas'),
+                              ('solicitadas', 'Solicitadas'),
+                              ('reservadas', 'Reservadas'),
+                              ('historial', 'Historial'),
+                            ]) ...[
+                              FilterChip(
+                                label: Text(etiqueta),
+                                selected: _filtro == valor,
+                                onSelected: (_) =>
+                                    setState(() => _filtro = valor),
+                              ),
+                              const SizedBox(width: AppEspacio.xs),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (_ultimaSync != null)
+                        Padding(
+                          padding:
+                              const EdgeInsets.only(top: AppEspacio.xs),
+                          child: Text(
+                            'Actualizado a las '
+                            '${_ultimaSync!.hour.toString().padLeft(2, '0')}:'
+                            '${_ultimaSync!.minute.toString().padLeft(2, '0')}',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                      if (nadaVisible)
+                        const EstadoVacio(
+                          sinMarco: true,
+                          icono: Icons.search_off_rounded,
+                          titulo: 'Sin resultados',
+                          subtitulo:
+                              'Prueba con otra búsqueda o filtro.',
+                        ),
+                      if (verSolicitadas && vencidasF.isNotEmpty) ...[
+                        _tituloSeccion('Vencidas', vencidasF.length),
+                        for (final r in vencidasF)
+                          TarjetaReserva(
+                            // 1.36 H-B3 (136-749): clave
+                            // estable por reserva — la lista ya
+                            // no salta al reconstruirse.
+                            key: ValueKey('reserva-${r.id}'),
+                            reserva: r,
+                            bloqueada: _bloqueada(r.id),
+                            errorSync: _erroresOp[r.id],
+                            onReintentar: () => _refrescar(),
+                            onConfirmar: () => _confirmar(r),
+                            onRechazar: () => _rechazar(r),
+                            onCancelar: () => _cancelar(r),
+                            onCobrar: () => _cobrar(r),
+                          ),
+                      ],
+                      if (verSolicitadas && solicitadasF.isNotEmpty) ...[
                         _tituloSeccion(
-                            'Solicitadas', b.solicitadas.length),
-                        for (final r in b.solicitadas)
+                            'Solicitadas', solicitadasF.length),
+                        for (final r in solicitadasF)
                           TarjetaReserva(
+                            key: ValueKey('reserva-${r.id}'),
                             reserva: r,
                             bloqueada: _bloqueada(r.id),
+                            errorSync: _erroresOp[r.id],
+                            onReintentar: () => _refrescar(),
                             onConfirmar: () => _confirmar(r),
                             onRechazar: () => _rechazar(r),
                             onCancelar: () => _cancelar(r),
                             onCobrar: () => _cobrar(r),
                           ),
                       ],
-                      if (b.reservadas.isNotEmpty) ...[
-                        _tituloSeccion('Reservadas', b.reservadas.length),
-                        for (final r in b.reservadas)
+                      if (verReservadas && reservadasF.isNotEmpty) ...[
+                        _tituloSeccion('Reservadas', reservadasF.length),
+                        for (final r in reservadasF)
                           TarjetaReserva(
+                            key: ValueKey('reserva-${r.id}'),
                             reserva: r,
                             bloqueada: _bloqueada(r.id),
+                            errorSync: _erroresOp[r.id],
+                            onReintentar: () => _refrescar(),
                             onConfirmar: () => _confirmar(r),
                             onRechazar: () => _rechazar(r),
                             onCancelar: () => _cancelar(r),
                             onCobrar: () => _cobrar(r),
                           ),
                       ],
-                      if (b.historial.isNotEmpty) ...[
-                        _tituloSeccion('Historial', b.historial.length),
-                        for (final r in b.historial)
+                      if (verHistorial && historialF.isNotEmpty) ...[
+                        // 1.36 H-B3 (136-748): el historial se
+                        // rotula con su tope real (30).
+                        _tituloSeccion(
+                            'Historial · últimas 30', historialF.length),
+                        for (final r in historialF)
                           TarjetaReserva(
+                            key: ValueKey('reserva-${r.id}'),
                             reserva: r,
                             bloqueada: _bloqueada(r.id),
+                            errorSync: _erroresOp[r.id],
+                            onReintentar: () => _refrescar(),
                             onConfirmar: () => _confirmar(r),
                             onRechazar: () => _rechazar(r),
                             onCancelar: () => _cancelar(r),
@@ -1011,6 +1213,10 @@ class _MiniFotoReservaState extends State<_MiniFotoReserva> {
     return FutureBuilder<File?>(
       future: _futura,
       builder: (ctx, snap) {
+        // 1.36 H-B3 (136-748): el ERROR de foto tiene su
+        // propio placeholder — no cae en el mismo que
+        // «sin foto» (eran indistinguibles).
+        if (snap.hasError) return const _ErrorFotoReserva();
         final f = snap.data;
         if (f != null) {
           // 1.34 Campo 2 (P-1): hueco de 48 dp — decodificar
@@ -1020,11 +1226,35 @@ class _MiniFotoReservaState extends State<_MiniFotoReserva> {
             fit: BoxFit.cover,
             cacheWidth:
                 (48 * MediaQuery.devicePixelRatioOf(ctx)).round(),
-            errorBuilder: (_, __, ___) => const _SinFotoReserva(),
+            // 1.36 H-B3 (136-749): la foto entra con fundido,
+            // no de golpe sobre el placeholder.
+            frameBuilder: (_, child, frame, __) => AnimatedOpacity(
+              opacity: frame == null ? 0 : 1,
+              duration: AppMovimiento.corta,
+              child: child,
+            ),
+            errorBuilder: (_, __, ___) => const _ErrorFotoReserva(),
           );
         }
         return const _SinFotoReserva();
       },
+    );
+  }
+}
+
+/// 1.36 H-B3 (136-748): placeholder de ERROR de foto de
+/// reserva — icono de imagen rota con color de error, para
+/// no confundirlo con «este suplemento no tiene foto».
+class _ErrorFotoReserva extends StatelessWidget {
+  const _ErrorFotoReserva();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColores.superficieHundida(context),
+      alignment: Alignment.center,
+      child: Icon(Icons.broken_image_rounded,
+          size: 20, color: AppColores.errorTexto(context)),
     );
   }
 }
@@ -1159,10 +1389,16 @@ class _AvatarReservaClienteState extends State<_AvatarReservaCliente> {
   Widget build(BuildContext context) {
     return FutureBuilder<File?>(
       future: _futura,
-      builder: (ctx, snap) => AvatarCliente(
-        nombre: widget.nombre,
-        foto: snap.data,
-        tamano: TamanoAvatar.s,
+      // 1.36 H-B3 (136-749): el avatar cruza con fundido
+      // entre iniciales y foto (clave por ruta resuelta).
+      builder: (ctx, snap) => AnimatedSwitcher(
+        duration: AppMovimiento.corta,
+        child: AvatarCliente(
+          key: ValueKey(snap.data?.path ?? 'sin-foto'),
+          nombre: widget.nombre,
+          foto: snap.data,
+          tamano: TamanoAvatar.s,
+        ),
       ),
     );
   }
@@ -1175,6 +1411,12 @@ class _AvatarReservaClienteState extends State<_AvatarReservaCliente> {
 class TarjetaReserva extends StatelessWidget {
   final ReservaVista reserva;
   final bool bloqueada;
+
+  /// 1.36 H-B3 (136-746): detalle si la op encolada de esta
+  /// reserva está en ERROR (null si no): la tarjeta muestra
+  /// el chip de error con salida, no «sincronizando».
+  final String? errorSync;
+  final VoidCallback? onReintentar;
   final VoidCallback onConfirmar;
   final VoidCallback onRechazar;
   final VoidCallback onCancelar;
@@ -1184,11 +1426,40 @@ class TarjetaReserva extends StatelessWidget {
     super.key,
     required this.reserva,
     required this.bloqueada,
+    this.errorSync,
+    this.onReintentar,
     required this.onConfirmar,
     required this.onRechazar,
     required this.onCancelar,
     required this.onCobrar,
   });
+
+  Future<void> _verDetalleError(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Error al sincronizar'),
+        content: Text(
+          'La acción quedó guardada en este teléfono, pero la '
+          'sincronización la devolvió con error:\n\n$errorSync\n\n'
+          'Al reintentar, la sincronización la vuelve a subir.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onReintentar?.call();
+            },
+            child: const Text('Reintentar'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1213,6 +1484,10 @@ class TarjetaReserva extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(r.clienteNombre,
+                    // 1.36 H-B3 (136-748): nombre acotado a
+                    // 2 líneas con ellipsis.
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: AppTexto.subtitulo
                         .copyWith(fontWeight: FontWeight.bold)),
               ),
@@ -1238,7 +1513,9 @@ class TarjetaReserva extends StatelessWidget {
                         Border.all(color: AppColores.borde(context)),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
+                    // 1.36 H-B3 (136-748): radio del token,
+                    // como el borde que lo envuelve.
+                    borderRadius: BorderRadius.circular(AppRadio.sm),
                     child: _MiniFotoReserva(
                       fotoLocal: r.fotoSuplementoLocal,
                       fotoStorage: r.fotoSuplementoStorage,
@@ -1252,6 +1529,8 @@ class TarjetaReserva extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('${r.cantidad} × ${r.suplementoNombre}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: AppTexto.cuerpo),
                       Text(
                           'Total: ${fmtMonto(r.totalFoto)} ${r.moneda} '
@@ -1264,8 +1543,10 @@ class TarjetaReserva extends StatelessWidget {
             ),
             if (avisoMonedaReserva(r) != null)
               Text(avisoMonedaReserva(r)!,
-                  style: AppTexto.secundario
-                      .copyWith(color: AppColores.error)),
+                  // 1.36 H-B3 (136-748): aviso informativo con
+                  // token de alerta, no color de error.
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.alertaTexto(context))),
             // V27: el vencimiento va siempre en el mismo sitio
             // (línea con reloj bajo el total): en alerta si vence
             // en 24 h o ya venció; si no, en secundario.
@@ -1291,8 +1572,43 @@ class TarjetaReserva extends StatelessWidget {
             if (r.notaResolucion != null &&
                 r.notaResolucion!.isNotEmpty)
               Text('Nota: ${r.notaResolucion}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: AppTexto.secundario),
-            if (bloqueada)
+            if (errorSync != null)
+              // 1.36 H-B3 (136-746): la op en ERROR se dice
+              // como error, con salida (detalle + reintento);
+              // no se disfraza de «sincronizando».
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const ChipEstado.semantico(
+                      texto: 'Error al sincronizar',
+                      significado: SignificadoChip.error,
+                      icono: Icons.error_rounded,
+                    ),
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => _verDetalleError(context),
+                          icon: const Icon(Icons.info_rounded,
+                              size: 16),
+                          label: const Text('Ver detalle'),
+                        ),
+                        TextButton.icon(
+                          onPressed: onReintentar,
+                          icon: const Icon(Icons.refresh_rounded,
+                              size: 16),
+                          label: const Text('Reintentar'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            else if (bloqueada)
               const Padding(
                 padding: EdgeInsets.only(top: AppEspacio.sm),
                 child: ChipEstado.semantico(
@@ -1317,17 +1633,21 @@ class TarjetaReserva extends StatelessWidget {
                 ),
               ),
             if (solicitada && !bloqueada && !r.solicitudVencida(ahora))
+              // 1.36 H-B3 (136-749): acciones con icono, como
+              // en los diálogos de la casa.
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  OutlinedButton(
+                  OutlinedButton.icon(
                     onPressed: onRechazar,
-                    child: const Text('Rechazar'),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: const Text('Rechazar'),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
+                  FilledButton.icon(
                     onPressed: onConfirmar,
-                    child: const Text('Confirmar'),
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: const Text('Confirmar'),
                   ),
                 ],
               ),
@@ -1352,14 +1672,17 @@ class TarjetaReserva extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  OutlinedButton(
+                  OutlinedButton.icon(
                     onPressed: onCancelar,
-                    child: const Text('Cancelar'),
+                    icon: const Icon(Icons.undo_rounded, size: 18),
+                    label: const Text('Cancelar'),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
+                  FilledButton.icon(
                     onPressed: onCobrar,
-                    child: const Text('Cobrar'),
+                    icon: const Icon(Icons.payments_rounded,
+                        size: 18),
+                    label: const Text('Cobrar'),
                   ),
                 ],
               ),
