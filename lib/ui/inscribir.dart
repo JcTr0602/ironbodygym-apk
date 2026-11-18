@@ -5,6 +5,7 @@
 /// confirmadas).
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -112,6 +113,23 @@ class _InscribirScreenState extends State<InscribirScreen> {
   }
   File? _foto;
   bool _guardando = false;
+  // 1.36 (136-689): identidad del intento de guardado. La
+  // op de inscripción y la foto se encolan en dos pasos: si
+  // el segundo falla (disco, compresión), el usuario
+  // reintenta desde esta misma pantalla — y el reintento NO
+  // puede generar otra op de inscripción para la misma
+  // persona o el servidor la inscribe dos veces. El intento
+  // vive en el State: opUuid + huella del payload + si la
+  // op ya entró en la cola. Con el MISMO payload se reutiliza
+  // el uuid y solo se reintenta lo que falta (la foto); con
+  // un payload DISTINTO (el usuario corrigió los datos tras
+  // el fallo) nace un intento nuevo. Al completar, se limpia.
+  String? _opUuidIntento;
+  String? _payloadIntentoJson;
+  bool _opIntentoEncolada = false;
+  String? _opUuidCasaIntento;
+  String? _payloadCasaIntentoJson;
+  bool _opCasaEncolada = false;
   bool _esMenor = false;
   // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
   bool _carnetFechaInvalida = false;
@@ -609,7 +627,6 @@ class _InscribirScreenState extends State<InscribirScreen> {
       if (okCasa != true || !mounted) return;
       setState(() => _guardando = true);
       try {
-        final opUuidCasa = const Uuid().v4();
         final payloadCasa = <String, dynamic>{
           'nombre': nombre,
           'sexo': _sexo,
@@ -623,18 +640,35 @@ class _InscribirScreenState extends State<InscribirScreen> {
           'cuenta_casa': 1,
           if (_crearAccesoApp) 'crear_acceso_app': true,
         };
-        await LocalDb.instance.queueOp(
-          opUuid: opUuidCasa,
-          tipo: 'inscribir',
-          payload: payloadCasa,
-          fotoPath: _foto?.path,
-        );
+        // 136-689: reintento del MISMO payload = mismo uuid
+        // y la op no se vuelve a encolar (solo la foto).
+        final payloadCasaJson = jsonEncode(payloadCasa);
+        if (_opUuidCasaIntento == null ||
+            _payloadCasaIntentoJson != payloadCasaJson) {
+          _opUuidCasaIntento = const Uuid().v4();
+          _payloadCasaIntentoJson = payloadCasaJson;
+          _opCasaEncolada = false;
+        }
+        final opUuidCasa = _opUuidCasaIntento!;
+        if (!_opCasaEncolada) {
+          await LocalDb.instance.queueOp(
+            opUuid: opUuidCasa,
+            tipo: 'inscribir',
+            payload: payloadCasa,
+            fotoPath: _foto?.path,
+          );
+          _opCasaEncolada = true;
+        }
         if (_foto?.path != null) {
           await FotosColaService.instance.encolarFoto(
             opUuid: opUuidCasa,
             rutaOriginal: _foto!.path,
           );
         }
+        // Guardado completo: el intento se cierra.
+        _opUuidCasaIntento = null;
+        _payloadCasaIntentoJson = null;
+        _opCasaEncolada = false;
         if (!mounted) return;
         // 1.35 (UI-02): la inscripción guardada se siente.
         Tacto.confirmacion();
@@ -682,7 +716,6 @@ class _InscribirScreenState extends State<InscribirScreen> {
 
     setState(() => _guardando = true);
     try {
-      final opUuid = const Uuid().v4();
       String? fotoPath = _foto?.path;
       final payload = <String, dynamic>{
         'nombre': nombre,
@@ -737,31 +770,46 @@ class _InscribirScreenState extends State<InscribirScreen> {
             widget.conversion!.medidas.isNotEmpty)
           'medidas_invitado': widget.conversion!.medidasPayload,
       };
-      // v1.5.0 (Bloque G, G1): en una conversión, el registro
-      // local durable `opEncolada` con ESTE op_uuid se persiste
-      // ANTES de encolar la op, y la op se encola con ese mismo
-      // uuid: ninguna op de conversión puede quedar huérfana por
-      // un cierre de la app (ver encolarInscripcionConversion).
-      final conv = widget.conversion;
-      if (conv != null) {
-        await encolarInscripcionConversion(
-          invitadoId: conv.invitadoId,
-          conversionUuid: conv.conversionUuid,
-          opUuid: opUuid,
-          encolar: (uuid) => LocalDb.instance.queueOp(
-            opUuid: uuid,
+      // 1.36 (136-689): el uuid del intento se decide con el
+      // payload YA construido: mismo payload que el intento
+      // vivo = mismo uuid (y abajo la op no se re-encola);
+      // payload distinto = intento nuevo.
+      final payloadIntentoJson = jsonEncode(payload);
+      if (_opUuidIntento == null ||
+          _payloadIntentoJson != payloadIntentoJson) {
+        _opUuidIntento = const Uuid().v4();
+        _payloadIntentoJson = payloadIntentoJson;
+        _opIntentoEncolada = false;
+      }
+      final opUuid = _opUuidIntento!;
+      if (!_opIntentoEncolada) {
+        // v1.5.0 (Bloque G, G1): en una conversión, el registro
+        // local durable `opEncolada` con ESTE op_uuid se persiste
+        // ANTES de encolar la op, y la op se encola con ese mismo
+        // uuid: ninguna op de conversión puede quedar huérfana por
+        // un cierre de la app (ver encolarInscripcionConversion).
+        final conv = widget.conversion;
+        if (conv != null) {
+          await encolarInscripcionConversion(
+            invitadoId: conv.invitadoId,
+            conversionUuid: conv.conversionUuid,
+            opUuid: opUuid,
+            encolar: (uuid) => LocalDb.instance.queueOp(
+              opUuid: uuid,
+              tipo: 'inscribir',
+              payload: payload,
+              fotoPath: fotoPath,
+            ),
+          );
+        } else {
+          await LocalDb.instance.queueOp(
+            opUuid: opUuid,
             tipo: 'inscribir',
             payload: payload,
             fotoPath: fotoPath,
-          ),
-        );
-      } else {
-        await LocalDb.instance.queueOp(
-          opUuid: opUuid,
-          tipo: 'inscribir',
-          payload: payload,
-          fotoPath: fotoPath,
-        );
+          );
+        }
+        _opIntentoEncolada = true;
       }
       if (fotoPath != null) {
         // v1.2.9: usar la cola persistente (no fotos_pendientes).
@@ -770,6 +818,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
           rutaOriginal: fotoPath,
         );
       }
+      // Guardado completo: el intento se cierra.
+      _opUuidIntento = null;
+      _payloadIntentoJson = null;
+      _opIntentoEncolada = false;
       if (!mounted) return;
       // 1.35 (UI-02): la inscripción guardada se siente.
       Tacto.confirmacion();
