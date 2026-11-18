@@ -231,12 +231,15 @@ class _VistaPreviaClienteScreenState
     } catch (_) {}
   }
 
-  /// ¿Cuenta a la Casa? Manda la RPC si lo trae; si no, el
-  /// espejo local (que siempre lo trae).
+  /// ¿Cuenta a la Casa? 1.36 H-B1 (136-484): si la RPC
+  /// trae la clave `cuenta_casa`, MANDA ella — aunque valga
+  /// false (un false del servidor no lo puede tapar un
+  /// espejo local viejo en true); el espejo solo decide si
+  /// la clave está AUSENTE.
   bool get _esCasa {
-    if (_cliente['cuenta_casa'] == true ||
-        _cliente['cuenta_casa'] == 1) {
-      return true;
+    if (_cliente.containsKey('cuenta_casa')) {
+      final v = _cliente['cuenta_casa'];
+      return v == true || v == 1;
     }
     final local = _clienteLocal;
     return local != null && esCuentaCasa(local);
@@ -503,18 +506,38 @@ class _VistaPreviaClienteScreenState
                               // solo el mensaje amable de _error).
                               const SizedBox(
                                   height: AppEspacio.lg),
-                              OutlinedButton.icon(
-                                icon: const Icon(
-                                    Icons.refresh_rounded,
-                                    size: 18),
-                                label: const Text('Reintentar'),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: _naranja,
-                                  side: const BorderSide(
-                                      color: _naranja),
+                              // 1.36 H-B1 (136-498): la
+                              // denegación del dueño no se
+                              // «reintenta» — ofrece Volver.
+                              if (_error!
+                                  .startsWith('Solo el dueño'))
+                                OutlinedButton.icon(
+                                  icon: const Icon(
+                                      Icons.arrow_back_rounded,
+                                      size: 18),
+                                  label: const Text('Volver'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: _naranja,
+                                    side: const BorderSide(
+                                        color: _naranja),
+                                  ),
+                                  onPressed: () =>
+                                      Navigator.of(context)
+                                          .maybePop(),
+                                )
+                              else
+                                OutlinedButton.icon(
+                                  icon: const Icon(
+                                      Icons.refresh_rounded,
+                                      size: 18),
+                                  label: const Text('Reintentar'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: _naranja,
+                                    side: const BorderSide(
+                                        color: _naranja),
+                                  ),
+                                  onPressed: _cargar,
                                 ),
-                                onPressed: _cargar,
-                              ),
                             ],
                           ),
                         ),
@@ -660,9 +683,16 @@ class _VistaPreviaClienteScreenState
   }
 
   String _turnoLegible(Object? t) {
+    // 1.36 H-B1 (136-486): coincidencias EXPLÍCITAS —
+    // el prefijo suelto de dos letras leía «Mañana» en
+    // «martes» o «semana».
     final s = '${t ?? ''}'.toLowerCase();
     if (s.contains('tarde')) return 'Tarde';
-    if (s.contains('ma')) return 'Mañana';
+    if (s.contains('mañana') ||
+        s.contains('manana') ||
+        s.contains('matutino')) {
+      return 'Mañana';
+    }
     return s.isEmpty ? '—' : '$t';
   }
 
@@ -719,7 +749,10 @@ class _VistaPreviaClienteScreenState
         _tituloSeccion('Catálogo (${catalogo.length})'),
         Padding(
           padding: EdgeInsets.only(bottom: AppEspacio.sm),
-          child: Text('Vista previa: las acciones están deshabilitadas',
+          // 1.36 H-B1 (136-500): el rótulo dice lo que
+          // SÍ pasa al tocar, no lo que no pasa.
+          child: Text(
+              'Al tocar un botón se explica qué hace en su app',
               style: AppTexto.metadato.copyWith(color: Colors.white54)),
         ),
         for (final s in catalogo)
@@ -804,7 +837,18 @@ class _VistaPreviaClienteScreenState
   void _explicarCompraWhatsApp(Map<dynamic, dynamic> s) {
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      // 1.36 H-B1 (136-492): el diálogo hereda el tema
+      // OSCURO de la vista previa (la app del cliente es
+      // oscura), no el tema claro de Gestión.
+      builder: (ctx) => Theme(
+        data: ThemeData(
+          brightness: Brightness.dark,
+          colorScheme: const ColorScheme.dark(
+            primary: _naranja,
+            surface: Color(0xFF1E1E1E),
+          ),
+        ),
+        child: AlertDialog(
         title: const Text('Vista previa'),
         content: Text(
             'En la app del cliente, este botón abre su WhatsApp '
@@ -813,12 +857,13 @@ class _VistaPreviaClienteScreenState
             '«Hola, quiero comprar: ${s['nombre'] ?? 'este producto'} '
             '(\$${formatoMonto(s['precio_oficial'])})»\n\n'
             'Aquí es solo una muestra: no se envía ningún mensaje.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Entendido'),
-          ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -840,7 +885,9 @@ class _VistaPreviaClienteScreenState
   Widget _tabPlan() {
     final planCrudo = _datos?['plan_nutricional'];
     final plan = planCrudo == null ? null : mapaSeguro(planCrudo);
-    if (plan == null) {
+    // 1.36 H-B1 (136-488): un mapa VACÍO también es
+    // «sin plan» (antes pintaba la tarjeta con «—»).
+    if (plan == null || plan.isEmpty) {
       return Center(
         child: _vacioOscuro(Icons.restaurant_menu_rounded,
             'Sin plan asignado',
@@ -872,6 +919,11 @@ class _VistaPreviaClienteScreenState
                 strong: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold),
                 listBullet: const TextStyle(color: Colors.white70),
+                // 1.36 H-B1 (136-501): los enlaces del
+                // plan no navegan en la vista previa —
+                // se pintan como texto normal, sin prometer
+                // un toque que no lleva a ningún sitio.
+                a: AppTexto.cuerpo.copyWith(color: Colors.white70),
               ),
             ),
           ]),
@@ -1226,7 +1278,12 @@ class _VistaPreviaClienteScreenState
     // contenido, no por igualdad exacta con dos frases.
     final t = disp.trim().toLowerCase();
     if (t.isEmpty) return const SizedBox.shrink();
-    final color = t.contains('agot')
+    // 1.36 H-B1 (136-485): la NEGACIÓN manda — «no
+    // disponible» contiene «dispon» y salía VERDE.
+    final negado = t.contains('no dispon') ||
+        t.contains('sin stock') ||
+        t.contains('no hay');
+    final color = (negado || t.contains('agot'))
         ? Colors.red
         : (t.contains('últim') || t.contains('ultim'))
             ? Colors.amber
