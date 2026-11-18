@@ -29,7 +29,6 @@ import 'diseno.dart';
 import 'permisos_ui.dart';
 import 'ficha.dart';
 import 'pendiente.dart';
-import 'widgets.dart';
 
 /// Yunque 3 (K5-1): filtro PURO de «Mis vencimientos» sobre las
 /// filas del espejo de clientes: solo los atribuidos al
@@ -1171,7 +1170,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             ),
       body: Column(
         children: [
-          const SyncBanner(),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           Expanded(
             child: _cargando
                 ? const EstadoCargando(

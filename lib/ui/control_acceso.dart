@@ -30,7 +30,6 @@ import 'modal_pin_acceso.dart';
 import 'panel_permisos.dart';
 import 'turnos_hub.dart';
 import 'usuarios.dart';
-import 'widgets.dart';
 import 'componentes.dart';
 
 /// 1.32 (H-RPC-1, Corte A): un resultado de la generación
@@ -423,7 +422,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     }
     return Column(
       children: [
-        const SyncBanner(compact: true),
+        // UI136-02: sin SyncBanner propio — el estado de sync
+        // se dice una sola vez, en el marco (Regla 6).
         Expanded(
           child: _cargando
               ? const EstadoCargando(texto: 'Cargando control de acceso…')

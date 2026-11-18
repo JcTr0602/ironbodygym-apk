@@ -137,11 +137,6 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   // (antes cada venta releía y ordenaba TODO el espejo sin
   // indicador; la caché se invalida en cada _cargar).
   List<Map<String, dynamic>>? _clientesCache;
-  // 1.28 (M3-B4): ops de Servicios de HOY aún en la cola: el
-  // sello de frescura del cuadre («incluye N por
-  // sincronizar»). Las ventas en cola ya componen la lista
-  // de hoy (M3-C5); el sello cuenta TODAS las ops del día.
-  int _opsColaHoy = 0;
   // 1.29 (Oleada 4, FB-09): estado de MI petición de relleno
   // para el suplemento del pomo seleccionado (espejo u op aún
   // en cola). Con petición viva, la banda de pomo bajo enseña
@@ -325,15 +320,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       ..sort((a, b) =>
           ((b['id'] as num?)?.toInt() ?? 0)
               .compareTo((a['id'] as num?)?.toInt() ?? 0));
-    // 1.28 (M3-C5 + B4): la cola de Servicios de hoy compone
+    // 1.28 (M3-C5): la cola de Servicios de hoy compone
     // la pantalla: las VENTAS aún sin espejar entran en la
     // lista con su marca «en cola» (hasta hoy una venta
-    // offline no tenía fila: ni se veía ni se podía revisar),
-    // y el conteo de ops del día alimenta el sello de
-    // frescura del cuadre.
+    // offline no tenía fila: ni se veía ni se podía revisar).
     final opsCola = await opsPendientesServicios();
-    final opsColaHoy =
-        contarOpsServiciosEnCola(opsCola, desde: hoy, hasta: hoy).total;
     final uuidsEspejo = <String>{
       for (final v in ventasHoyEspejo)
         if ('${v['op_uuid'] ?? ''}'.trim().isNotEmpty)
@@ -398,7 +389,6 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _cuadre = cuadre;
       _cuadreGym = cuadreGym;
       _ventasHoy = ventasHoy;
-      _opsColaHoy = opsColaHoy;
       _reversadas = reversadas;
       _cargando = false;
       _errorCarga = false;
@@ -2717,20 +2707,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
             ],
           ),
-          // 1.28 (M3-B4): sello de frescura del cuadre. El
-          // cuadre YA compone espejo + cola (sus cifras
-          // incluyen estas ops); el sello lo dice para que
-          // nadie lo tome por definitivo mientras el teléfono
-          // aún no sube.
-          if (_opsColaHoy > 0) ...[
-            const SizedBox(height: 10),
-            ChipEstado.semantico(
-              texto: 'Incluye $_opsColaHoy '
-                  'operacion${_opsColaHoy == 1 ? '' : 'es'} por sincronizar',
-              significado: SignificadoChip.info,
-              icono: Icons.sync_rounded,
-            ),
-          ],
+          // UI136-02: fuera el sello «incluye N por
+          // sincronizar» del cuadre — el estado de sync se
+          // dice una sola vez, en el marco (Regla 6). Las
+          // cifras del cuadre siguen componiendo espejo +
+          // cola, como siempre.
           // Rediseño 1.18 (Jc 2026-10-29): Estadísticas y
           // Ranking bajan del AppBar a enlaces con texto aquí.
           // Ranking: dueño siempre; entrenador solo con su

@@ -30,7 +30,6 @@ import 'permisos_ui.dart';
 import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'ficha.dart';
-import 'widgets.dart';
 import '../app_log.dart';
 
 /// Un cobro del día: viene del espejo (ya sincronizado) o de una op
@@ -827,7 +826,8 @@ class _PagoScreenState extends State<PagoScreen> {
       appBar: appBarIron(context, 'Agregar pago'),
       body: Column(
         children: [
-          const SyncBanner(compact: true, alcance: 'pagos'),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           _resumenDia(),
           _ultimosCobros(),
           Padding(

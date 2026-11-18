@@ -23,7 +23,6 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'permisos_ui.dart';
 import 'reporte_mensual_diarios.dart';
-import 'widgets.dart';
 import '../app_log.dart';
 
 /// ¿Puede este usuario editar/anular un registro de pago diario?
@@ -599,7 +598,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(compact: true),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           Expanded(
             // 1.36 H-B2 (136-622): el cambio de modo cruza,
             // no salta.

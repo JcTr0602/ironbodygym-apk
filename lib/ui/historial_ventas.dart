@@ -24,7 +24,6 @@ import '../cliente_protegido.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'widgets.dart';
 import '../app_log.dart';
 
 /// Totales del historial excluyendo ventas de clientes protegidos
@@ -488,7 +487,8 @@ class _HistorialVentasScreenState
       ),
       body: Column(
         children: [
-          const SyncBanner(compact: true),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           _filtros(),
           _totales(),
           Expanded(child: _cuerpo()),

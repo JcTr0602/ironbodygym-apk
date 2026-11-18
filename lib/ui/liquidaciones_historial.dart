@@ -19,7 +19,6 @@ import 'app_bar.dart';
 import 'arqueo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'widgets.dart';
 
 class LiquidacionesHistorialScreen extends StatefulWidget {
   const LiquidacionesHistorialScreen({super.key});
@@ -232,7 +231,8 @@ class _LiquidacionesHistorialScreenState
       appBar: appBarIron(context, 'Últimas liquidaciones'),
       body: Column(
         children: [
-          const SyncBanner(),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           Padding(
             padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                 AppEspacio.md, AppEspacio.lg, 0),

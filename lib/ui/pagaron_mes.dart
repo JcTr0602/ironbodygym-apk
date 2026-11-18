@@ -27,7 +27,6 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'skeleton.dart';
-import 'widgets.dart';
 import '../app_log.dart';
 
 class PagaronMesScreen extends StatefulWidget {
@@ -268,7 +267,8 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(alcance: 'pagos'),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           // 1.25 T118 (F2-17): buscador y, para el dueño, la
           // base de nómina que esta lista forma (antes la
           // cifra vivía solo en el título y la base de

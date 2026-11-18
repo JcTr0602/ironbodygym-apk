@@ -34,8 +34,6 @@ import 'diseno.dart';
 import 'historial_ventas.dart' show vendedorVentaSuplementoId;
 import 'primitivas.dart';
 import 'skeleton.dart';
-import 'servicios.dart';
-import 'widgets.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
 
@@ -677,7 +675,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       appBar: widget.embebida ? null : appBarIron(context, 'Mi nómina'),
       body: Column(
         children: [
-          const SyncBanner(compact: true),
+          // UI136-02: sin SyncBanner propio — el estado de sync
+          // se dice una sola vez, en el marco (Regla 6).
           Expanded(child: _cuerpo()),
         ],
       ),
