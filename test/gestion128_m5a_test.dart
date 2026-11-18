@@ -162,8 +162,18 @@ void main() {
           contains('«hasta» debe ser posterior'));
       expect(mensajeErrorAnuncio('NO_EXISTE'),
           contains('ya no existe'));
+      // CONTRATO MOVIDO (1.36, bloque J-2a): este test
+      // fijaba que un código desconocido se mostraba tal
+      // cual (contains('OTRA_COSA')). La adjudicación de
+      // Jc (2026-11-17) sobre la excepción P-02 del
+      // Yunque Exhaustivo 1.35 manda lo contrario: el
+      // código crudo NUNCA llega a pantalla; sale la
+      // frase humana genérica.
       expect(mensajeErrorAnuncio('OTRA_COSA'),
-          contains('OTRA_COSA'));
+          'El servidor no aceptó el anuncio. Revisa el '
+          'texto e inténtalo de nuevo.');
+      expect(mensajeErrorAnuncio('OTRA_COSA'),
+          isNot(contains('OTRA_COSA')));
       expect(mensajeErrorAnuncio(null),
           contains('no aplicó el cambio'));
     });

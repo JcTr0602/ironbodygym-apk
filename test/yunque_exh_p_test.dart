@@ -16,14 +16,14 @@
 ///   endurecimiento espera decisión en el paquete de
 ///   contratos. Aquí se fija ese contrato tal cual.
 /// - P-02 (mensajeErrorAnuncio): la corrección (rama por
-///   defecto genérica) quedó probada y REVERTIDA por
-///   choque con test/gestion128_m5a_test.dart:165-166,
-///   que fija que un código desconocido se muestra tal
-///   cual. Sus tests discriminantes quedan en este
-///   archivo como `skip` con el motivo: son el test del
-///   desbloqueo si Jc actualiza aquel contrato. El test
-///   de códigos conocidos sigue activo (no cambia en
-///   ninguna de las dos versiones de la función).
+///   defecto genérica) quedó probada y REVERTIDA en la
+///   1.35 por choque con test/gestion128_m5a_test.dart,
+///   que fijaba que un código desconocido se muestra tal
+///   cual. APLICADA en la 1.36 por adjudicación de Jc
+///   (2026-11-17, bloque J-2a): los tests discriminantes
+///   de abajo ya no llevan `skip` y el contrato de
+///   gestion128_m5a_test se actualizó al nuevo
+///   comportamiento con constancia del cambio.
 ///
 /// listarRemoto() en sí no se ejercita (exige
 /// Supabase/red); su catch delega en mensajeErrorAmable,
@@ -35,33 +35,25 @@ import 'package:ironbody_gym/anuncios_admin.dart';
 import 'package:ironbody_gym/congelaciones_gestion.dart';
 
 void main() {
-  group('P-02 mensajeErrorAnuncio (EN PAQUETE DE DECISIÓN)', () {
-    test(
-      'un código nuevo del servidor no aparece en el texto',
-      () {
-        const codigo = 'TEXTO_DEMASIADO_LARGO_V2';
-        final m = mensajeErrorAnuncio(codigo);
-        expect(m, isNot(contains(codigo)));
-        expect(
-            m,
-            'El servidor no aceptó el anuncio. Revisa el texto e '
-            'inténtalo de nuevo.');
-      },
-      skip: 'P-02 espera decisión: gestion128_m5a_test fija el '
-          'código crudo; este test es el discriminante del '
-          'desbloqueo (Yunque Exhaustivo 1.35).',
-    );
+  group('P-02 mensajeErrorAnuncio (APLICADO, adjudicación '
+      'de Jc 2026-11-17)', () {
+    test('un código nuevo del servidor no aparece en el texto',
+        () {
+      const codigo = 'TEXTO_DEMASIADO_LARGO_V2';
+      final m = mensajeErrorAnuncio(codigo);
+      expect(m, isNot(contains(codigo)));
+      expect(
+          m,
+          'El servidor no aceptó el anuncio. Revisa el texto e '
+          'inténtalo de nuevo.');
+    });
 
-    test(
-      'otro código desconocido cualquiera tampoco aparece',
-      () {
-        final m = mensajeErrorAnuncio('CODIGO_INTERNO_999_XYZ');
-        expect(m, isNot(contains('CODIGO_INTERNO_999_XYZ')));
-        expect(m, contains('no aceptó el anuncio'));
-      },
-      skip: 'P-02 espera decisión: gestion128_m5a_test fija el '
-          'código crudo (Yunque Exhaustivo 1.35).',
-    );
+    test('otro código desconocido cualquiera tampoco aparece',
+        () {
+      final m = mensajeErrorAnuncio('CODIGO_INTERNO_999_XYZ');
+      expect(m, isNot(contains('CODIGO_INTERNO_999_XYZ')));
+      expect(m, contains('no aceptó el anuncio'));
+    });
 
     test('un código conocido conserva su frase específica', () {
       expect(mensajeErrorAnuncio('SOLO_DUENO'),

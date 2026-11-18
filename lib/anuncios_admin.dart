@@ -172,8 +172,12 @@ List<AnuncioAdmin> parseAnunciosAdmin(Object? json) {
 /// Mensaje honesto para el código de error de las RPC
 /// admin_anuncio_* (la guarda es_dueno() y las
 /// validaciones viven en el servidor; la app traduce,
-/// no sustituye). Un código desconocido se muestra tal
-/// cual: mejor un código visible que un «error» mudo.
+/// no sustituye). Un código desconocido NUNCA se muestra
+/// crudo: sale la frase humana genérica (Yunque
+/// Exhaustivo 1.35, P-02; adjudicación de Jc
+/// 2026-11-17, bloque J-2a de la 1.36 — antes la rama
+/// por defecto enseñaba el código tal cual y ese era el
+/// contrato fijado por gestion128_m5a_test).
 String mensajeErrorAnuncio(String? codigo) {
   switch (codigo) {
     case 'SOLO_DUENO':
@@ -203,6 +207,10 @@ String mensajeErrorAnuncio(String? codigo) {
     case '':
       return 'El servidor no aplicó el cambio.';
     default:
-      return 'El servidor respondió: $codigo';
+      // P-02 (adjudicación de Jc 2026-11-17): un código
+      // que la app aún no conoce es un identificador
+      // interno, no un mensaje para el dueño.
+      return 'El servidor no aceptó el anuncio. Revisa '
+          'el texto e inténtalo de nuevo.';
   }
 }
