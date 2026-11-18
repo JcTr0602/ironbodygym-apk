@@ -33,6 +33,7 @@ import 'ficha.dart';
 import 'horario_gym.dart';
 import 'inscribir.dart';
 import 'reportes_plus.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,12 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   // tarjeta que miden ~170 (el propio comentario lo decía):
   // ahora el alto se MIDE de la primera tarjeta pintada.
   final _primeraTarjetaKey = GlobalKey();
+  // 1.36 H-B3 (136-706): clave estable por invitado para que
+  // el salto por letra use ensureVisible sobre la fila real
+  // cuando ya está construida (sin estimar altos).
+  final _clavesTarjeta = <String, GlobalKey>{};
+  GlobalKey _claveTarjeta(String id) =>
+      _clavesTarjeta.putIfAbsent(id, () => GlobalKey());
   double _altoTarjeta = 170;
   String _busqueda = '';
   String _orden = 'servidor';
@@ -283,6 +290,14 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         _cargando = false;
       });
       _cargarVisitasLista(lista);
+      // 1.36 H-B3 (136-711): filas omitidas por sucias ya no
+      // se tragan: la bandeja avisa de datos parciales.
+      if (_svc.omitidasUltimaLista > 0 && mounted) {
+        mostrarSnack(context,
+            'Datos parciales: ${_svc.omitidasUltimaLista} '
+            'registro(s) no se pudieron leer y no se muestran.',
+            significado: SignificadoChip.alerta);
+      }
       // 1.29 (FB-05): con la lista YA pintada, el conteo de
       // reportes Plus se pide en segundo plano.
       unawaited(_actualizarConteoReportes(gen));
@@ -953,6 +968,12 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                       setState(() {
                         _filtro = f.id;
                         _seleccion.clear();
+                        // 1.36 H-B3 (136-707): la búsqueda
+                        // no sobrevive en silencio al cambio
+                        // de filtro (parecía que el filtro
+                        // nuevo estaba vacío).
+                        _busqueda = '';
+                        _busquedaCtrl.clear();
                       });
                       _cargar();
                     },
@@ -963,7 +984,10 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             ),
           ),
         // v1.12.0 (A): buscador + orden sobre la página cargada.
-        if (!_offline && !_cargando)
+        // 1.36 H-B3 (136-707): el campo se CONSERVA durante los
+        // refrescos (antes desaparecía con _cargando y la
+        // búsqueda activa quedaba invisible).
+        if (!_offline)
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
@@ -975,13 +999,27 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 final estrecha = cons.maxWidth < 560;
                 final buscador = TextField(
                     controller: _busquedaCtrl,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       // F3-19: la búsqueda es sobre la página
                       // cargada; el hint lo dice.
                       hintText: 'Buscar en los cargados (nombre o teléfono)',
-                      prefixIcon: Icon(Icons.search_rounded, size: 20),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                      border: const OutlineInputBorder(),
                       isDense: true,
+                      // 1.36 H-B3 (136-707): limpiar la
+                      // búsqueda desde el propio campo.
+                      suffixIcon: _busqueda.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close_rounded,
+                                  size: 18),
+                              tooltip: 'Limpiar búsqueda',
+                              onPressed: () => setState(() {
+                                _busqueda = '';
+                                _busquedaCtrl.clear();
+                                _seleccion.clear();
+                              }),
+                            ),
                     ),
                     // 1.36 H-B2 (136-700): cambiar la
                     // búsqueda limpia la selección (el
@@ -1068,15 +1106,41 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.cleaning_services_rounded,
                     size: 18),
-                label: Text(
-                    'Limpiar caducados (${_listaVisible.length})'),
+                // 1.36 H-B3 (136-705): SIN número — la purga
+                // es GLOBAL en el servidor y el conteo visible
+                // (filtrado) mentía el alcance real.
+                label: const Text('Limpiar caducados'),
                 onPressed: _limpiarCaducados,
               ),
             ),
           ),
         // v1.12.0 (G3): entrada suave transversal.
-        Expanded(child: FadeEntrada(child: _cuerpo())),
-        if (_modoSeleccion && !_offline) _barraLote(),
+        // 1.36 H-B3 (136-706): los estados (carga/error/vacío/
+        // lista) cruzan con AnimatedSwitcher en vez de
+        // sustituirse en seco, y la barra de lote entra/sale
+        // con AnimatedSize (sin salto vertical).
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: AppMovimiento.media,
+            child: KeyedSubtree(
+              key: ValueKey(_cargando && _lista.isEmpty
+                  ? 'cargando'
+                  : _error != null
+                      ? 'error'
+                      : _listaVisible.isEmpty
+                          ? 'vacio'
+                          : 'lista'),
+              child: FadeEntrada(child: _cuerpo()),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: AppMovimiento.media,
+          alignment: Alignment.topCenter,
+          child: (_modoSeleccion && !_offline)
+              ? _barraLote()
+              : const SizedBox.shrink(),
+        ),
       ],
     );
     if (widget.embebido) return cuerpo;
@@ -1091,9 +1155,15 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   }
 
   Widget _cuerpo() {
-    if (_cargando) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColores.naranja));
+    if (_cargando && _lista.isEmpty) {
+      // 1.36 H-B3 (136-706): la carga inicial pinta el
+      // esqueleto de tarjetas de la casa, no un spinner
+      // aislado. Con lista ya pintada, el refresco la
+      // conserva (no vuelve al esqueleto).
+      return const Padding(
+        padding: EdgeInsets.all(AppEspacio.lg),
+        child: SkeletonLista(items: 4),
+      );
     }
     if (_error != null) {
       return Center(
@@ -1128,19 +1198,38 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       // patrón EstadoVacio de la casa (icono, título,
       // subtítulo y, si la vista es un filtro, la acción
       // que lo deshace).
+      // 1.36 H-B3 (136-705): con búsqueda activa, el vacío
+      // ofrece LIMPIARLA (antes ni «Ver todos» la limpiaba y
+      // la vista parecía vacía sin salida).
+      final conBusqueda = _busqueda.trim().isNotEmpty;
       return EstadoVacio(
         ilustracion: 'assets/vacio_recepcion.webp',
         icono: Icons.people_outline_rounded,
         titulo: 'No hay invitados en esta vista',
-        subtitulo: 'Los registros nuevos desde la app de '
-            'clientes aparecen aquí.',
-        textoAccion: _filtro != 'todos' ? 'Ver todos' : null,
-        onAccion: _filtro != 'todos'
-            ? () {
-                setState(() => _filtro = 'todos');
-                _cargar();
-              }
-            : null,
+        subtitulo: conBusqueda
+            ? 'Nada coincide con «${_busqueda.trim()}» en los '
+                'cargados.'
+            : 'Los registros nuevos desde la app de '
+                'clientes aparecen aquí.',
+        textoAccion: conBusqueda
+            ? 'Limpiar búsqueda'
+            : (_filtro != 'todos' ? 'Ver todos' : null),
+        onAccion: conBusqueda
+            ? () => setState(() {
+                  _busqueda = '';
+                  _busquedaCtrl.clear();
+                  _seleccion.clear();
+                })
+            : (_filtro != 'todos'
+                ? () {
+                    setState(() {
+                      _filtro = 'todos';
+                      _busqueda = '';
+                      _busquedaCtrl.clear();
+                    });
+                    _cargar();
+                  }
+                : null),
       );
     }
     final visible = _listaVisible;
@@ -1192,7 +1281,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           return Padding(
             // F3-30: la primera tarjeta lleva la llave de
             // medición del salto por letra.
-            key: i == 0 ? _primeraTarjetaKey : null,
+            // 1.36 H-B3 (136-706): cada fila lleva ADEMÁS su
+            // clave estable por id (la de medición envuelve).
+            key: i == 0 ? _primeraTarjetaKey : _claveTarjeta(inv.id),
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: GestureDetector(
               onLongPress: _offline ? null : alternar,
@@ -1286,15 +1377,27 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                           // del invitado. En conversión no se
                           // ofrece (ya tiene su camino).
                           if (!inv.enConversion)
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => _convertirDesdeLista(inv),
-                              child: _chip(
-                                  _convirtiendoId == inv.id
-                                      ? '⭐ Preparando conversión…'
-                                      : '⭐ Candidato a cliente · '
-                                          'Convertir',
-                                  _doradoPlus),
+                            // 1.36 H-B3 (136-705): el chip ES un
+                            // botón — lleva semántica de botón y
+                            // su estado de carga se anuncia.
+                            Semantics(
+                              button: true,
+                              enabled: _convirtiendoId != inv.id,
+                              label: _convirtiendoId == inv.id
+                                  ? 'Preparando conversión'
+                                  : 'Convertir candidato a cliente',
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: _convirtiendoId == inv.id
+                                    ? null
+                                    : () => _convertirDesdeLista(inv),
+                                child: _chip(
+                                    _convirtiendoId == inv.id
+                                        ? '⭐ Preparando conversión…'
+                                        : '⭐ Candidato a cliente · '
+                                            'Convertir',
+                                    _doradoPlus),
+                              ),
                             )
                           else
                             _chip('⭐ Candidato a cliente',
@@ -1421,6 +1524,26 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     if (medida != null && medida > 0) _altoTarjeta = medida;
     final idx = _indiceLetras[letra];
     if (idx == null || !_scroll.hasClients) return;
+    // 1.36 H-B3 (136-706): si la fila destino YA está
+    // construida, ensureVisible la trae exacta (las tarjetas
+    // varían de alto con los chips y la estimación aterrizaba
+    // lejos); la estimación queda solo como respaldo.
+    final visibles = _listaVisible;
+    if (idx >= 0 && idx < visibles.length) {
+      final destino = visibles[idx];
+      final ctxDestino = idx == 0
+          ? _primeraTarjetaKey.currentContext
+          : _clavesTarjeta[destino.id]?.currentContext;
+      if (ctxDestino != null) {
+        Scrollable.ensureVisible(
+          ctxDestino,
+          duration: AppMovimiento.media,
+          curve: Curves.easeOut,
+          alignment: 0,
+        );
+        return;
+      }
+    }
     final max = _scroll.position.maxScrollExtent;
     _scroll.animateTo(
       (idx * _altoTarjeta).clamp(0.0, max),
@@ -3314,7 +3437,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             const SizedBox(height: AppEspacio.sm),
             OutlinedButton.icon(
               icon: const Icon(Icons.event_available_rounded),
-              label: const Text('Extender vida (+30/+90 días)'),
+              // 1.36 H-B3 (136-705): la etiqueta dice lo que
+              // el diálogo ofrece de verdad (1–365 días).
+              label: const Text('Extender vida (1–365 días)'),
               onPressed: _actuando
                   ? null
                   : () => _accionUnica('vida_extender'),
@@ -3756,15 +3881,22 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
           const SizedBox(height: AppEspacio.md),
         ],
         const SizedBox(height: AppEspacio.sm),
-        _guardando
-            ? const Center(
-                child:
-                    CircularProgressIndicator(color: AppColores.naranja))
-            : BotonPrimario(
-                texto: 'Guardar información pública',
-                icono: Icons.save_rounded,
-                onPressed: _guardar,
-              ),
+        // 1.36 H-B3 (136-706): botón ↔ spinner con transición
+        // (antes el botón de Info Pública cambiaba en seco).
+        AnimatedSwitcher(
+          duration: AppMovimiento.media,
+          child: _guardando
+              ? const Center(
+                  key: ValueKey('guardando-info'),
+                  child:
+                      CircularProgressIndicator(color: AppColores.naranja))
+              : BotonPrimario(
+                  key: const ValueKey('guardar-info'),
+                  texto: 'Guardar información pública',
+                  icono: Icons.save_rounded,
+                  onPressed: _guardar,
+                ),
+        ),
         const SizedBox(height: AppEspacio.lg),
       ],
     );

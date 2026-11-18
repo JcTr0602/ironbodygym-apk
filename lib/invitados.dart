@@ -214,8 +214,20 @@ class MedidaInvitado {
   }
 }
 
-String _fmtNum(double v) =>
-    v == v.roundToDouble() ? '${v.toInt()}' : '$v';
+/// 1.36 H-B3 (136-710): máximo 2 decimales, sin ceros de
+/// relleno ni la cola larga de `$v` (82.30000000000001).
+/// Función PURA, probada por contrato.
+String fmtNumInvitado(double v) {
+  if (v == v.roundToDouble()) return '${v.toInt()}';
+  var s = v.toStringAsFixed(2);
+  while (s.contains('.') && s.endsWith('0')) {
+    s = s.substring(0, s.length - 1);
+  }
+  if (s.endsWith('.')) s = s.substring(0, s.length - 1);
+  return s;
+}
+
+String _fmtNum(double v) => fmtNumInvitado(v);
 
 /// Fila de la bandeja (`invitados_listar`). SIN datos corporales.
 class InvitadoResumen {
@@ -745,15 +757,25 @@ class ResultadoMedidasInvitado {
   }
 
   /// Texto listo para la UI del detalle.
+  /// 1.36 H-B3 (136-710): plural real (sin «(s)») y sin
+  /// mayúsculas de máquina («NO» → «no»).
   String get texto {
     if (!verificadas) {
-      return 'Las medidas del invitado NO se importaron: no se '
+      return 'Las medidas del invitado no se importaron: no se '
           'pudieron verificar ($motivoLegible). La inscripción '
           'sí se completó.';
     }
-    final partes = <String>['$importadas importada(s)'];
+    final partes = <String>[
+      importadas == 1
+          ? '1 importada'
+          : '$importadas importadas',
+    ];
     if (duplicadas > 0) partes.add('$duplicadas ya existían');
-    if (descartadas > 0) partes.add('$descartadas descartada(s)');
+    if (descartadas > 0) {
+      partes.add(descartadas == 1
+          ? '1 descartada'
+          : '$descartadas descartadas');
+    }
     return 'Medidas del invitado verificadas: ${partes.join(' · ')}.';
   }
 }
@@ -1434,6 +1456,23 @@ class InvitadosService {
   final Future<dynamic> Function(
       String nombre, Map<String, dynamic>? params)? _rpcInyectado;
 
+  // 1.36 H-B3 (136-711): lo que el servicio antes tragaba en
+  // silencio queda expuesto tras cada llamada, para que la UI
+  // pueda avisar de datos parciales o del motivo de un fallo.
+  /// Filas omitidas por sucias en el último [listar].
+  int omitidasUltimaLista = 0;
+
+  /// Error legible del último [resumen] fallido; null si el
+  /// último resumen respondió (aunque la RPC no exista y el
+  /// resultado sea null: eso NO es un error).
+  String? errorUltimoResumen;
+
+  /// Motivo legible del último [purgarVencidos] sin éxito.
+  String? motivoUltimoPurgar;
+
+  /// Motivo legible del último [rechazarSolicitud] sin éxito.
+  String? motivoUltimoRechazo;
+
   /// Serialización de las operaciones sobre las marcas de info
   /// pública pendiente (v1.7.0, delta del panel): guardar y
   /// republicar NUNCA se solapan dentro del mismo isolate. Sin
@@ -1510,10 +1549,14 @@ class InvitadosService {
     final lista = res is Map ? res['invitados'] : null;
     // 1.28 (M4-A11): fila a fila con red de seguridad — una
     // fila sucia se salta; la lista sobrevive.
-    return [
-      for (final j in (lista is List ? lista : const []))
-        ..._resumenSeguro(j),
+    final crudas = lista is List ? lista : const [];
+    final limpias = [
+      for (final j in crudas) ..._resumenSeguro(j),
     ];
+    // 1.36 H-B3 (136-711): las omitidas ya no se tragan: la
+    // UI avisa de datos parciales con este conteo.
+    omitidasUltimaLista = crudas.length - limpias.length;
+    return limpias;
   }
 
   /// Solicitudes de inscripción pendientes de atender: la MISMA
@@ -1546,11 +1589,17 @@ class InvitadosService {
   Future<InvitadosConteos?> resumen() async {
     try {
       final res = await _rpcLectura('invitados_resumen');
+      errorUltimoResumen = null;
       if (res is Map) {
         return InvitadosConteos.fromJson(
             res.map((k, v) => MapEntry('$k', v)));
       }
-    } catch (_) {}
+    } catch (e) {
+      // 1.36 H-B3 (136-711): el fallo queda distinguible de
+      // «la RPC aún no existe» (res no-Map → null sin error).
+      errorUltimoResumen =
+          e is InvitadoError ? e.mensaje : '$e';
+    }
     return null;
   }
 
@@ -1731,11 +1780,24 @@ class InvitadosService {
       'p_invitado_id': invitadoId,
       'p_motivo': motivo.trim(),
     });
-    if (res is! Map) return false;
-    if (res['ok'] == false) return false;
+    // 1.36 H-B3 (136-711): el false lleva su motivo legible.
+    if (res is! Map) {
+      motivoUltimoRechazo =
+          'El servidor no devolvió una respuesta válida.';
+      return false;
+    }
+    if (res['ok'] == false) {
+      motivoUltimoRechazo = _textoTolerante(
+              res['motivo'] ?? res['error'] ?? res['mensaje']) ??
+          'El servidor rechazó la operación.';
+      return false;
+    }
     final n = _enteroTolerante(res['rechazadas']);
     // Sin contador en la respuesta, una respuesta sin error es éxito.
-    return n == null ? true : n > 0;
+    final ok = n == null ? true : n > 0;
+    motivoUltimoRechazo =
+        ok ? null : 'No quedaba ninguna solicitud pendiente.';
+    return ok;
   }
 
   /// v1.12.0 (F1): limpiar caducados en un toque. RPC del dueño
@@ -1749,8 +1811,15 @@ class InvitadosService {
         'invitados_purgar_vencidos', {'p_dias_convertido': diasConvertido});
     if (res is Map) {
       final n = res['purgados'] ?? res['eliminados'] ?? res['borrados'];
+      final ok = res['ok'] != false;
+      // 1.36 H-B3 (136-711): motivo legible cuando no hay éxito.
+      motivoUltimoPurgar = ok
+          ? null
+          : (_textoTolerante(
+                  res['motivo'] ?? res['error'] ?? res['mensaje']) ??
+              'El servidor no confirmó la limpieza.');
       return (
-        ok: res['ok'] != false,
+        ok: ok,
         purgados: _enteroTolerante(n) ?? 0,
       );
     }
@@ -1758,6 +1827,8 @@ class InvitadosService {
     // DESTRUCTIVA no es «no quedaba nada»: es fallo. Antes el
     // llamador mostraba «Limpieza completada» con 0 purgados
     // ante una respuesta que no se pudo interpretar.
+    motivoUltimoPurgar =
+        'El servidor no devolvió una respuesta válida.';
     return (ok: false, purgados: 0);
   }
 
@@ -2446,9 +2517,25 @@ String? normalizarTelefonoInfoPublica(String crudo) {
 /// (vacío = borrar la clave, válido). Devuelve el mensaje de
 /// aviso o null si el valor es aceptable. Función PURA.
 String? validarValorInfoPublica(String clave, String valor) {
-  if (!esClaveTelefonoInfoPublica(clave)) return null;
   final v = valor.trim();
   if (v.isEmpty) return null;
+  // 1.36 H-B3 (136-711): la URL del grupo de WhatsApp sí se
+  // valida (antes pasaba cualquier texto y el enlace público
+  // quedaba roto en la app de clientes).
+  if (clave == 'whatsapp_grupo_url') {
+    final uri = Uri.tryParse(v);
+    final host = uri?.host.toLowerCase() ?? '';
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        !(host == 'chat.whatsapp.com' ||
+            host.endsWith('.whatsapp.com') ||
+            host == 'wa.me')) {
+      return 'debe ser un enlace válido de WhatsApp '
+          '(https://chat.whatsapp.com/…)';
+    }
+    return null;
+  }
+  if (!esClaveTelefonoInfoPublica(clave)) return null;
   if (normalizarTelefonoInfoPublica(v) == null) {
     return 'debe ser un teléfono de 8 dígitos '
         '(se acepta con +53 y espacios)';
