@@ -4736,7 +4736,17 @@ String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
   // «Tú» también en la vista del dueño sobre ops ajenas) y
   // los payloads ilegibles se bitacoran con contador (antes
   // el catch los descartaba en silencio).
-  final miTidOverlay = AuthService().telegramId;
+  // (cierre de Aplica-136): la lectura va blindada — sin
+  // Supabase inicializado (tests puros de esta función,
+  // isolates sin sesión) Supabase.instance LANZA y tumbaría
+  // todo el overlay, no solo el rótulo; sin identidad no hay
+  // «Tú», que es lo conservador (cazado por diarios_gabriel).
+  int? miTidOverlay;
+  try {
+    miTidOverlay = AuthService().telegramId;
+  } catch (_) {
+    miTidOverlay = null;
+  }
   var ilegiblesOverlay = 0;
   for (final op in opsPendientes) {
     try {
