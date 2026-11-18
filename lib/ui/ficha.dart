@@ -1657,6 +1657,90 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
+  /// 1.36: Mes de cortesía (solo dueño) — el regalo
+  /// discrecional de Jc, SIN candado anual (ese es solo del
+  /// regalo de cumpleaños de arriba). La mecánica es la misma
+  /// de aquel: fecha calculada con previewHastaDias
+  /// (max(vigencia, hoy) + 30 días, la regla del servidor),
+  /// reflejo optimista en el espejo, op encolada con la fecha
+  /// de negocio y sello de procedencia. Cambia el contrato:
+  /// la op es `regalar_mes` (servidor en vivo desde el
+  /// 2026-11-18) y NO hay diálogo de WhatsApp — no es una
+  /// felicitación, es un acto del mostrador; la ficha
+  /// recargada enseña el resultado.
+  /// Anti-doble-toque síncrono, como el del cumpleaños: la
+  /// bandera se pone antes del primer await (dos cortesías
+  /// apiladas por un doble toque serían dos meses reales).
+  bool _cortesiaEnCurso = false;
+
+  Future<void> _regalarMesCortesia() async {
+    if (_cortesiaEnCurso) return;
+    _cortesiaEnCurso = true;
+    try {
+      await _regalarMesCortesiaFlujo();
+    } finally {
+      _cortesiaEnCurso = false;
+    }
+  }
+
+  Future<void> _regalarMesCortesiaFlujo() async {
+    final c = _c;
+    if (c == null || !mounted || !AuthService().isOwner) return;
+    final nombre = '${c['nombre'] ?? ''}';
+    final pagadoHastaActual = c['pagado_hasta'] as String?;
+    // La confirmación enseña la fecha RESULTANTE antes de
+    // confirmar, calculada con la regla del servidor.
+    final nuevoHasta = previewHastaDias(pagadoHastaActual, 30);
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Mes de cortesía',
+        iconoTitulo: Icons.card_giftcard_rounded,
+        contenido: Text('¿Dar 1 mes gratis a $nombre?\n\n'
+            'Quedará pagado hasta el ${_fmtFechaLarga(nuevoHasta)} '
+            'de ${nuevoHasta.substring(0, 4)}.'),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Dar el mes'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+    // a) Reflejo optimista en el espejo local: la ficha
+    // enseña el nuevo vencimiento en el acto.
+    await LocalDb.instance
+        .updateMirrorPagadoHasta(widget.clienteId, nuevoHasta);
+    // b) Encolar la op del contrato (payload {cliente_id,
+    // fecha}: la fecha de negocio, no la del día del push).
+    final opUuidCortesia = const Uuid().v4();
+    await LocalDb.instance.queueOp(
+      opUuid: opUuidCortesia,
+      tipo: 'regalar_mes',
+      payload: {
+        'cliente_id': widget.clienteId,
+        'fecha': isoHabana(ahoraHabana()).substring(0, 10),
+      },
+    );
+    // b1) Sello de procedencia, como en el regalo de
+    // cumpleaños: esta op es la autora del vencimiento
+    // recién pintado.
+    await LocalDb.instance
+        .registrarProcedenciaPago(widget.clienteId, opUuidCortesia);
+    if (!mounted) return;
+    mostrarSnack(context,
+        'Mes de cortesía dado: pagado hasta el ${fmtFecha(nuevoHasta)}',
+        significado: SignificadoChip.exito);
+    // c) Disparar sincronización sin esperar.
+    unawaited(SyncEngine.instance.push());
+    _cargar();
+  }
+
   /// Reenvía el mensaje de WhatsApp del regalo ya otorgado este año
   /// (Argón spec 2): no aplica otro mes, solo reabre el diálogo.
   Future<void> _reenviarWhatsApp() async {
@@ -4557,6 +4641,30 @@ class _FichaScreenState extends State<FichaScreen> {
                                       '1 mes gratis · 1 vez al año',
                                       style: AppTexto.secundario),
                                   onTap: _regalarMes,
+                                ),
+                              // 1.36: Mes de cortesía — el
+                              // regalo discrecional del dueño
+                              // (op regalar_mes, sin candado
+                              // anual). La Casa no recibe
+                              // regalos (el servidor también
+                              // lo rechaza) y un eliminado no
+                              // es destino de cortesía.
+                              if (!esCasa &&
+                                  !LocalDb.esEliminadoDe(c))
+                                ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                      Icons.card_giftcard_rounded,
+                                      color: AppColores.textoSecundario(context),
+                                      size: 20),
+                                  title: const Text(
+                                      'Mes de cortesía',
+                                      style: AppTexto.cuerpo),
+                                  subtitle: const Text(
+                                      '1 mes gratis · sin límite anual',
+                                      style: AppTexto.secundario),
+                                  onTap: _regalarMesCortesia,
                                 ),
                               ListTile(
                                 dense: true,
