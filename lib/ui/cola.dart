@@ -1707,15 +1707,17 @@ class _ColaScreenState extends State<ColaScreen> {
             if (_fotosPendientes + _fotosSubiendo > 0) ...[
               const SizedBox(height: 4),
               Text(
+                // (1.36 H-B4 136-914) plural real.
                 '📷 Además, ${_fotosPendientes + _fotosSubiendo} '
-                'foto(s) por subir.',
+                '${(_fotosPendientes + _fotosSubiendo) == 1 ? 'foto' : 'fotos'} por subir.',
                 style: AppTexto.cuerpo,
               ),
             ],
             if (_fotosError > 0) ...[
               const SizedBox(height: 4),
               Text(
-                '⚠️ $_fotosError foto(s) fallaron al subir — '
+                '⚠️ $_fotosError '
+                '${_fotosError == 1 ? 'foto falló' : 'fotos fallaron'} al subir — '
                 'míralas en «Fotos», aquí abajo.',
                 style: AppTexto.cuerpo,
               ),
@@ -1803,7 +1805,8 @@ class _ColaScreenState extends State<ColaScreen> {
           if (_retenidas > 0) ...[
             const SizedBox(height: 4),
             Text(
-              '$_retenidas recién creada(s) en ventana de edición: '
+              '$_retenidas recién '
+              '${_retenidas == 1 ? 'creada' : 'creadas'} en ventana de edición: '
               'suben solas en unos segundos, o toca «Subir ahora».',
               style: AppTexto.secundario,
             ),
@@ -1814,7 +1817,8 @@ class _ColaScreenState extends State<ColaScreen> {
               // 1.35 (SP-04/SP-05): «por subir» cuenta las
               // fotos pendientes Y las que están subiendo,
               // por foto (no por variante).
-              'Además, ${_fotosPendientes + _fotosSubiendo} foto(s) por subir.',
+              'Además, ${_fotosPendientes + _fotosSubiendo} '
+              '${(_fotosPendientes + _fotosSubiendo) == 1 ? 'foto' : 'fotos'} por subir.',
               style: AppTexto.secundario,
             ),
           ],
@@ -1844,7 +1848,7 @@ class _ColaScreenState extends State<ColaScreen> {
           '⚠ La tabla «$nombre» quedó atascada al bajar: una '
           'fila no se pudo verificar'
           '${_atasco.seq != null ? ' (posición ${_atasco.seq})' : ''}'
-          '${_atasco.filas > 0 ? ' · ${_atasco.filas} fila(s) con problema' : ''}. '
+          '${_atasco.filas > 0 ? ' · ${_atasco.filas} ${_atasco.filas == 1 ? 'fila' : 'filas'} con problema' : ''}. '
           'El resto de la app sigue funcionando y esa tabla se '
           'reintenta sola en cada ciclo. Toca «Sincronizar '
           'ahora» para reintentar ya; si el atasco sigue, dile '
@@ -3849,15 +3853,36 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
   List<CorridaOpSync>? _opsDiario;
   List<CorridaTablaSync>? _tablasDiario;
   String? _corridaDiarioTxt;
+  // (1.36 H-B4 136-933) fallo de carga del detalle: error
+  // con reintento, no el respaldo mudo.
+  bool _falloCarga = false;
+
+  Future<void> _recargar() async {
+    setState(() {
+      _cargando = true;
+      _falloCarga = false;
+    });
+    try {
+      if (widget.tipo == TipoDetalleSync.subidos) {
+        await _cargarSubidos();
+      } else {
+        await _cargarBajados();
+      }
+    } catch (e) {
+      AppLog.error('cola', 'detalle_sync_carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    if (widget.tipo == TipoDetalleSync.subidos) {
-      _cargarSubidos();
-    } else {
-      _cargarBajados();
-    }
+    _recargar();
   }
 
   /// Cabecera de la corrida del diario (hora Habana).
@@ -4176,10 +4201,14 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
       itemCount: 1 + ops.length,
       itemBuilder: (ctx, i) {
         if (i == 0) {
+          // (1.36 H-B4 136-933) cabecera solo si hay texto.
+          if ((_corridaDiarioTxt ?? '').isEmpty) {
+            return const SizedBox.shrink();
+          }
           return Padding(
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child:
-                Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
+                Text(_corridaDiarioTxt!, style: AppTexto.subtitulo),
           );
         }
         final op = ops[i - 1];
@@ -4190,7 +4219,11 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(describirTipoOp(op.tipo)),
+                    // (1.36 H-B4 136-933) el tipo no se
+                    // repite cuando el título ya lo dice.
+                    if (op.resumen != null &&
+                        op.resumen != describirTipoOp(op.tipo))
+                      Text(describirTipoOp(op.tipo)),
                     if (op.motivo != null && op.motivo!.isNotEmpty)
                       Padding(
                         padding:
@@ -4225,10 +4258,13 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
       itemCount: 1 + tablas.length,
       itemBuilder: (ctx, i) {
         if (i == 0) {
+          if ((_corridaDiarioTxt ?? '').isEmpty) {
+            return const SizedBox.shrink();
+          }
           return Padding(
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child:
-                Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
+                Text(_corridaDiarioTxt!, style: AppTexto.subtitulo),
           );
         }
         final t = tablas[i - 1];
@@ -4239,8 +4275,15 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
                   const Icon(Icons.download_rounded, color: AppColores.info),
               title: Text(kEtiquetasTablaSync[t.tabla] ??
                   SyncEngine.nombreAmigableTabla(t.tabla)),
-              subtitle: t.tumbas > 0
-                  ? Text('${t.tumbas} eliminadas')
+              // (1.36 H-B4 136-933) las «vistas» también
+              // se cuentan (recibidas sin cambio).
+              subtitle: (t.recibidas > 0 || t.tumbas > 0)
+                  ? Text([
+                      if (t.recibidas > 0)
+                        '${t.recibidas} ${t.recibidas == 1 ? 'vista' : 'vistas'}',
+                      if (t.tumbas > 0)
+                        '${t.tumbas} ${t.tumbas == 1 ? 'eliminada' : 'eliminadas'}',
+                    ].join(' · '))
                   : null,
               trailing: Text(
                 '${t.aplicadas}',
@@ -4260,13 +4303,28 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
       appBar: appBarIron(
         context,
         esSubidos ? 'Detalle de subidos' : 'Detalle de bajados',
+        acciones: [
+          // (1.36 H-B4 136-933) recarga manual del detalle.
+          IconButton(
+            tooltip: 'Recargar',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _cargando ? null : _recargar,
+          ),
+        ],
       ),
       body: _cargando
           // 1.25 T114: esqueleto con la forma de la lista.
           ? const Padding(
               padding: EdgeInsets.all(AppEspacio.lg),
               child: SkeletonLista(items: 4))
-          : esSubidos
+          : _falloCarga
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el detalle',
+                  detalle: 'La lectura del diario falló en este '
+                      'teléfono. Reinténtalo.',
+                  onReintentar: _recargar,
+                )
+              : esSubidos
               ? (_opsDiario != null
                   ? _buildSubidosDiario()
                   : _buildSubidos())

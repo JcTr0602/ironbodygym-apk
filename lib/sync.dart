@@ -341,6 +341,11 @@ class SyncStatus {
     if (pending > 0) {
       return '$pending cambio${pending == 1 ? '' : 's'} por enviar';
     }
+    // (1.36 H-B4 136-911) con novedades por bajar o con un
+    // error persistido, la frase NO afirma «sincronizado».
+    final aviso = avisoSyncCorto?.trim() ?? '';
+    if (aviso.isNotEmpty) return aviso;
+    if (hayNovedades == true) return 'Hay novedades por bajar';
     if (enLinea == null) return 'Todo guardado en este teléfono';
     return 'Todo guardado y sincronizado';
   }
@@ -560,14 +565,19 @@ List<String> resumenBajadaCompleta(BajadaCompletaResultado r) {
         'marcada y se hará en el próximo ciclo completo.');
     return out;
   }
-  out.add('Bajada completa: ${r.bajados} fila(s) nueva(s) bajada(s).');
+  // (1.36 H-B4 136-914) singular/plural real, sin «(s)».
+  String n(int v, String uno, String varios) => v == 1 ? uno : varios;
+  out.add('Bajada completa: ${r.bajados} '
+      '${n(r.bajados, 'fila nueva bajada', 'filas nuevas bajadas')}.');
   if (r.purgaDiferida) {
     out.add('La limpieza de filas viejas quedó para el próximo ciclo: '
-        'había ${r.pendientesAntes} operación(es) sin subir y la '
+        'había ${r.pendientesAntes} '
+        '${n(r.pendientesAntes, 'operación', 'operaciones')} sin subir y la '
         'purga solo corre con la cola limpia. Nada se borró.');
   }
   if (r.tablasPendientes.isNotEmpty) {
-    out.add('${r.tablasPendientes.length} tabla(s) reintentarán solas '
+    out.add('${r.tablasPendientes.length} '
+        '${n(r.tablasPendientes.length, 'tabla reintentará sola', 'tablas reintentarán solas')} '
         'en el próximo ciclo: ${r.tablasPendientes.join(', ')}.');
   }
   if (!r.purgaDiferida && r.tablasPendientes.isEmpty) {
@@ -2221,7 +2231,12 @@ class SyncEngine {
   /// con google.com antes de declarar "sin conexión".
   Future<bool> _hayInternet() async {
     try {
-      final res = await InternetAddress.lookup('google.com')
+      // (1.36 H-B4 136-913) la señal «en línea» se deduce
+      // del propio servidor de sync (su host), no del DNS
+      // de google.com: que Google resuelva no dice nada de
+      // que ESTE servidor responda.
+      final host = Uri.parse(AppConfig.supabaseUrl).host;
+      final res = await InternetAddress.lookup(host)
           .timeout(const Duration(seconds: 5));
       return res.isNotEmpty;
     } catch (_) {

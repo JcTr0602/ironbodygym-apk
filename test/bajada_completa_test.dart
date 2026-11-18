@@ -19,7 +19,7 @@ void main() {
     );
     expect(r.purgaDiferida, isFalse);
     final lineas = resumenBajadaCompleta(r);
-    expect(lineas.join(' '), contains('42 fila(s)'));
+    expect(lineas.join(' '), contains('42 filas nuevas bajadas'));
     expect(lineas.join(' '), contains('reconstruidos por completo'));
     expect(lineas.join(' '), isNot(contains('quedó para el próximo')));
   });

@@ -198,8 +198,33 @@ class ComprobantesService {
     }
     if (staging == null) {
       ext = 'jpg';
-      // Si el origen no se puede copiar, la excepción sube con
-      // la fila y el archivo anteriores INTACTOS.
+      // (1.36 H-B4 136-941) antes de copiar el original tal
+      // cual (podía ser un PNG pesado con extensión .jpg
+      // mentirosa), se intenta una compresión JPEG real.
+      try {
+        final resJpeg = await FlutterImageCompress.compressAndGetFile(
+          rutaOrigen,
+          stagingJpg.path,
+          minWidth: 1600,
+          minHeight: 1600,
+          quality: 85,
+          format: CompressFormat.jpeg,
+        );
+        if (resJpeg != null &&
+            await stagingJpg.exists() &&
+            await stagingJpg.length() > 0) {
+          staging = stagingJpg;
+        }
+      } catch (e) {
+        AppLog.error('comprobantes', 'compresion_fallo',
+            d: 'uuid=$comprobanteUuid causa=excepcion formato=jpeg '
+                'detalle=$e');
+      }
+    }
+    if (staging == null) {
+      // Último recurso: copiar el original. Si el origen no
+      // se puede copiar, la excepción sube con la fila y el
+      // archivo anteriores INTACTOS.
       await File(rutaOrigen).copy(stagingJpg.path);
       if (await stagingJpg.exists() &&
           await stagingJpg.length() > 0) {
