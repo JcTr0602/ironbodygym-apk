@@ -562,7 +562,10 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
                         contentPadding: EdgeInsets.zero,
                         title: Text(
                             '${f['entrenador_nombre'] ?? f['entrenador'] ?? '—'} · '
-                            '${((f['monto'] as num?)?.toDouble() ?? 0).toStringAsFixed(0)} CUP',
+                            // UI136-17: el formateador de la
+                            // casa (fmtMonto), como el resto
+                            // del archivo — no el crudo.
+                            '${fmtMonto((f['monto'] as num?)?.toDouble() ?? 0)} CUP',
                             style: AppTexto.cuerpo),
                         subtitle: Text(
                             // SL-5 G07-5: fecha habanera con
