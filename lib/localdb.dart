@@ -24,15 +24,15 @@ import 'turnos_resolucion.dart';
 import 'auth.dart';
 import 'fotos.dart';
 
-/// Una condición de [LocalDb.pagosPorFiltro]: fragmento SQL con su
-/// argumento ligado, más el predicado equivalente en Dart para el
-/// fallback de filas con columnas NULL.
+/// Una condición de [LocalDb.pagosPorFiltro]: fragmento SQL con
+/// sus argumentos ligados, más el predicado equivalente en Dart
+/// para el fallback de filas con columnas NULL.
 class _CondicionPago {
   final String columna;
   final String sql;
-  final Object? arg;
+  final List<Object?> args;
   final bool Function(Map<String, dynamic>) dart;
-  const _CondicionPago(this.columna, this.sql, this.arg, this.dart);
+  const _CondicionPago(this.columna, this.sql, this.args, this.dart);
 }
 
 /// Una condición de [LocalDb.servicioVentasPorFiltro] (v61):
@@ -6951,7 +6951,7 @@ class LocalDb {
       conds.add(_CondicionPago(
         'telegram_user_id',
         'telegram_user_id = ?',
-        telegramId,
+        [telegramId],
         (p) => normalizarTelegramId(p['telegram_user_id']) == telegramId,
       ));
     }
@@ -6959,23 +6959,33 @@ class LocalDb {
       conds.add(_CondicionPago(
         'metodo',
         'metodo = ?',
-        metodo,
+        [metodo],
         (p) => p['metodo'] == metodo,
       ));
     }
     if (fecha != null) {
+      // ARG136-11: la rama `fecha:` habla por fin en fecha
+      // de negocio Habana, como sus hermanas (fechaPrefijo,
+      // fechaDesde) y como servicioVentasPorFiltro /
+      // ventasSuplementosPorFiltro. El SQL es un PRECORTE
+      // con ventana ±1 día sobre la columna; el día exacto
+      // lo decide el filtro fino fechaNegocioHabana que se
+      // aplica a las filas de la consulta principal (abajo)
+      // y al fallback de columnas NULL (el predicado Dart),
+      // la pauta de pagosDelDia y mirrorPorFecha. (Cierra
+      // para esta rama la excepción nombrada de 136-925.)
       conds.add(_CondicionPago(
         'fecha',
-        'fecha = ?',
-        fecha,
-        (p) => '${p['fecha'] ?? ''}' == fecha,
+        'fecha >= ? AND fecha <= ?',
+        [_desplazarDiaTxt(fecha, -1), _desplazarDiaTxt(fecha, 1)],
+        (p) => fechaNegocioHabana(p['fecha']) == fecha,
       ));
     }
     if (fechaPrefijo != null) {
       conds.add(_CondicionPago(
         'fecha',
         'fecha LIKE ?',
-        '$fechaPrefijo%',
+        ['$fechaPrefijo%'],
         (p) => fechaNegocioHabana(p['fecha']).startsWith(fechaPrefijo),
       ));
     }
@@ -6983,7 +6993,7 @@ class LocalDb {
       conds.add(_CondicionPago(
         'fecha',
         'fecha >= ?',
-        fechaDesde,
+        [fechaDesde],
         (p) =>
             fechaNegocioHabana(p['fecha']).compareTo(fechaDesde) >= 0,
       ));
@@ -6996,14 +7006,19 @@ class LocalDb {
     final rows = await d.rawQuery(
       'SELECT id, data FROM pagos WHERE '
       '${conds.map((c) => c.sql).join(' AND ')}',
-      conds.map((c) => c.arg).toList(),
+      [for (final c in conds) ...c.args],
     );
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p =
+            jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        // ARG136-11: con `fecha:` el SQL es solo el
+        // precorte ±1 día — el día exacto lo decide aquí
+        // el mismo predicado fino del fallback.
+        if (fecha != null && fechaNegocioHabana(p['fecha']) != fecha) {
+          continue;
+        }
+        res.add({...p, 'id': r['id']});
       } catch (_) {}
     }
     // Fallback: filas con alguna columna filtrada en NULL (escritura
