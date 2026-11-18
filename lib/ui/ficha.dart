@@ -2101,9 +2101,11 @@ class _FichaScreenState extends State<FichaScreen> {
                       title: const Text('¿Borrar la fecha de pago?'),
                       content: const Text(
                           'El cliente quedará SIN fecha de pago, '
-                          'como si no hubiera pagado, y el cambio '
-                          'se sincronizará al guardar. Esto no se '
-                          'puede deshacer desde aquí.'),
+                          'como si no hubiera pagado. El borrado '
+                          'se guarda y se sincroniza al '
+                          'confirmar aquí mismo, sin esperar al '
+                          'Guardar de fuera. Esto no se puede '
+                          'deshacer desde aquí.'),
                       actions: [
                         TextButton(
                             onPressed: () => Navigator.pop(c2, false),
@@ -3636,8 +3638,11 @@ class _FichaScreenState extends State<FichaScreen> {
     required bool protegido,
   }) {
     return [
-                      FadeEntrada(
-                        child: CabeceraFicha(
+                      // 1.36 H-C1 (136-467): la cabecera ya
+                      // NO lleva FadeEntrada propio — entra
+                      // con EntradaSeccionFicha como las
+                      // demás secciones (era doble animación).
+                      CabeceraFicha(
                         nombre: nombre,
                         foto: _foto,
                         colorMarco: colorMarco,
@@ -3696,11 +3701,10 @@ class _FichaScreenState extends State<FichaScreen> {
                         // tira de la credencial cuando hay
                         // teléfono válido.
                         telefonoTexto:
-                            _telefonoEfectivoWa(c).length >= 10
+                            _telefonoEfectivoWa(c).isNotEmpty
                                 ? _telefonoEfectivoVisible(c)
                                 : null,
                         ),
-                      ),
                       const SizedBox(
                           height: AppEspacio.lg),
                       // Bloque 1: el único botón de cobro es el
@@ -4021,7 +4025,12 @@ class _FichaScreenState extends State<FichaScreen> {
                               Padding(
                                 padding: const EdgeInsets.only(
                                     top: AppEspacio.sm),
-                                child: TextButton.icon(
+                                // 1.36 H-C1 (136-474): la
+                                // renovación es la acción
+                                // principal junto al aviso —
+                                // botón tonal con peso, no
+                                // otro TextButton gemelo.
+                                child: FilledButton.tonalIcon(
                                   onPressed: _renovar,
                                   icon: const Icon(
                                       Icons.refresh_rounded,
@@ -4052,7 +4061,7 @@ class _FichaScreenState extends State<FichaScreen> {
                         // completo), no solo el archivo en memoria.
                         tieneFoto: _tieneFotoVerificado,
                         telefonoValido:
-                            _telefonoEfectivoWa(c).length >= 10,
+                            _telefonoEfectivoWa(c).isNotEmpty,
                         ultimaMedicionEn: _ultimaMedicionFecha,
                         puedeGestionarAcceso:
                             AuthService().isOwner ||
@@ -4093,7 +4102,11 @@ class _FichaScreenState extends State<FichaScreen> {
                                   child: Icon(
                                       Icons.person_outline_rounded,
                                       size: 18,
-                                      color: AppColores.textoSecundario(context)),
+                                      // 1.36 H-C1 (136-483):
+                                      // el icono va en el
+                                      // naranja de marca sobre
+                                      // su medallón, no en gris.
+                                      color: AppColores.naranja),
                                 ),
                                 const SizedBox(
                                     width: AppEspacio.sm),
@@ -4120,7 +4133,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
                             InkWell(
-                              onTap: _telefonoEfectivoWa(c).length >= 10
+                              onTap: _telefonoEfectivoWa(c).isNotEmpty
                               ? _abrirWhatsAppTelefono
                               : null,
                               borderRadius: BorderRadius.circular(
@@ -4722,7 +4735,9 @@ class _FichaScreenState extends State<FichaScreen> {
     // sirviendo la cabecera con el botón habilitado — la
     // guarda de reentrada (campo del State) funcionaría
     // igual, pero la señal visual nunca se pintaría.
-    if (w is FadeEntrada && w.child is CabeceraFicha) {
+    // 1.36 H-C1 (136-467): la cabecera ya no va envuelta
+    // en FadeEntrada; su versión se casa directa.
+    if (w is CabeceraFicha) {
       return Object.hash(versionFoto, _fotoDialogoEnCurso);
     }
     if (w is FadeEntrada || w is SeccionFotoPersonal) return versionFoto;
@@ -4841,12 +4856,26 @@ class _FichaScreenState extends State<FichaScreen> {
       'pendiente' => 'Pendiente',
       'en_revision' => 'En revisión',
       'resuelta' => 'Resuelta',
-      _ => '${estado ?? ''}',
+      // 1.36 H-C1 (136-477): un estado futuro no mapeado
+      // se lee legible (guiones a espacios y mayúscula
+      // inicial), no crudo con guion bajo.
+      _ => _estadoIncidenciaLegible(estado),
     };
   }
 
   /// Bloque 1: barra del mes pagado (del último pago al
   /// vencimiento). Si no hay fechas válidas, no ocupa espacio.
+
+  /// 1.36 H-C1 (136-477): fallback legible de un estado
+  /// de incidencia no mapeado.
+  static String _estadoIncidenciaLegible(Object? estado) {
+    final s = '${estado ?? ''}'
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .trim();
+    if (s.isEmpty) return 'Sin estado';
+    return s[0].toUpperCase() + s.substring(1);
+  }
 
 
   /// Fila de información con icono.
@@ -5545,7 +5574,11 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
     return DialogoApp(
       titulo: 'Editar pago',
       iconoTitulo: Icons.edit_rounded,
-      contenido: Column(
+      // 1.36 H-C1 (136-480): el contenido va en scroll —
+      // con el teclado abierto en pantalla corta el
+      // diálogo ya no desborda.
+      contenido: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           // 1.32 (O2F2, Pieza 4): el monto corregido se
@@ -5576,15 +5609,24 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
             onCambio: (f) => setState(() => _fecha = f),
           ),
           const SizedBox(height: 8),
-          Row(
+          // 1.36 H-C1 (136-481): la etiqueta va ENCIMA de
+          // los chips (en Wrap): la fila fija desbordaba
+          // en anchos estrechos o con fuente grande.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Método',
+                style: AppTexto.metadato.copyWith(
+                    color: AppColores.textoSecundario(context))),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
             children: [
-              const Text('Método: '),
               ChoiceChip(
                 label: const Text('Efectivo'),
                 selected: _metodo == 'efectivo',
                 onSelected: (_) => setState(() => _metodo = 'efectivo'),
               ),
-              const SizedBox(width: 8),
               ChoiceChip(
                 label: const Text('Transferencia'),
                 selected: _metodo == 'transferencia',
@@ -5600,6 +5642,7 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
                 border: OutlineInputBorder()),
           ),
         ],
+        ),
       ),
       acciones: [
         TextButton(

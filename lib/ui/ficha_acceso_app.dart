@@ -455,10 +455,20 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                 const SizedBox(width: AppEspacio.sm),
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.block_rounded,
-                        size: 18, color: AppColores.error),
-                    label: const Text('Revocar',
-                        style: TextStyle(color: AppColores.error)),
+                    // 1.36 H-C1 (136-527): mientras genera
+                    // o revoca, el botón deshabilitado se
+                    // APAGA (icono y texto en secundario);
+                    // el rojo fijo se leía como activo.
+                    icon: Icon(Icons.block_rounded,
+                        size: 18,
+                        color: (_generandoPin || _revocando)
+                            ? AppColores.textoSecundario(context)
+                            : AppColores.error),
+                    label: Text('Revocar',
+                        style: TextStyle(
+                            color: (_generandoPin || _revocando)
+                                ? AppColores.textoSecundario(context)
+                                : AppColores.error)),
                     onPressed: (_generandoPin || _revocando)
                         ? null
                         : () => _confirmarRevocar(acceso),
@@ -533,11 +543,17 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                 spacing: AppEspacio.xs,
                 runSpacing: 0,
                 children: [
-                  TextButton.icon(
-                    icon: const Icon(Icons.preview_rounded, size: 18),
-                    label: const Text('Vista previa App'),
-                    onPressed: _abrirVistaPrevia,
-                  ),
+                  // 1.36 H-C1 (136-499): «Vista previa App»
+                  // también es solo del dueño, como sus
+                  // dos hermanas de la fila (la pantalla
+                  // deniega al no dueño: la fila no lo
+                  // ofrece).
+                  if (AuthService().isOwner)
+                    TextButton.icon(
+                      icon: const Icon(Icons.preview_rounded, size: 18),
+                      label: const Text('Vista previa App'),
+                      onPressed: _abrirVistaPrevia,
+                    ),
                   if (AuthService().isOwner)
                     TextButton.icon(
                       icon: const Icon(Icons.groups_rounded, size: 18),

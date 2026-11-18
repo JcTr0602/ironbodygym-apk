@@ -287,7 +287,10 @@ class _VistaPreviaClienteScreenState
           })
           .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
-      if (data['status'] != 200) {
+      // 1.36 H-C1 (136-489): el status se normaliza con
+      // textoSeguro antes de comparar — un "200" textual
+      // de la RPC ya no se trata como fallo.
+      if ((textoSeguro(data['status']) ?? '').trim() != '200') {
         throw '${data['error'] ?? 'Error desconocido'}';
       }
       if (mounted) {
@@ -368,7 +371,12 @@ class _VistaPreviaClienteScreenState
             builder: (context, _) => _tabs.index == 0
                 ? Container(
                     width: double.infinity,
-                    color: _naranja,
+                    // 1.36 H-C1 (136-491): la franja va en
+                    // GRAFITO con texto blanco (el blanco
+                    // sobre naranja daba ~2,8:1; sobre
+                    // grafito el par cumple como el resto
+                    // de la pantalla espejo).
+                    color: _grafito,
                     padding: const EdgeInsets.symmetric(
                         vertical: AppEspacio.sm,
                         horizontal: AppEspacio.lg),
@@ -649,7 +657,12 @@ class _VistaPreviaClienteScreenState
           Text('ENTRENADOR DE TURNO HOY',
               style: AppTexto.metadato.copyWith(color: _naranja, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          if (turno.isNotEmpty) ...[
+          // 1.36 H-C1 (136-487): la rama «asignado» se
+          // elige por el NOMBRE no vacío, no por el mapa:
+          // un turno sin nombre ya no se pinta como
+          // asignado con un «—».
+          if (turno.isNotEmpty &&
+              '${turno['entrenador_nombre'] ?? ''}'.trim().isNotEmpty) ...[
             Text('${turno['entrenador_nombre'] ?? '—'}',
                 style: AppTexto.titulo.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
             Text(
@@ -807,6 +820,14 @@ class _VistaPreviaClienteScreenState
                 onPressed: () => _explicarCompraWhatsApp(s),
                 icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
                 label: const Text('Comprar por WhatsApp'),
+                // 1.36 H-C1 (136-495): lado y frente
+                // fijados como el «Reintentar» de la misma
+                // pantalla — sobre la tarjeta oscura no
+                // depende del tema de Gestión.
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _naranja,
+                  side: const BorderSide(color: _naranja),
+                ),
               ),
             ),
           ]),
@@ -924,6 +945,21 @@ class _VistaPreviaClienteScreenState
                 // se pintan como texto normal, sin prometer
                 // un toque que no lleva a ningún sitio.
                 a: AppTexto.cuerpo.copyWith(color: Colors.white70),
+                // 1.36 H-C1 (136-493): citas y código
+                // también en tokens espejo (antes caían a
+                // los defaults del tema de Gestión).
+                blockquote: AppTexto.cuerpo.copyWith(
+                    color: Colors.white70,
+                    fontStyle: FontStyle.italic),
+                blockquoteDecoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  border: const Border(
+                      left: BorderSide(color: _naranja, width: 3)),
+                ),
+                code: AppTexto.metadato.copyWith(
+                    color: Colors.white,
+                    backgroundColor:
+                        Colors.white.withValues(alpha: 0.10)),
               ),
             ),
           ]),
@@ -981,8 +1017,12 @@ class _VistaPreviaClienteScreenState
             _tarjeta([
               Row(
                 children: [
-                  Icon(Icons.emoji_events_rounded,
-                      color: AppColores.textoSecundario(context), size: 18),
+                  // 1.36 H-C1 (136-494): blanco fijo de la
+                  // pantalla espejo, como el resto (el
+                  // textoSecundario del tema de Gestión
+                  // salía gris sobre el grafito).
+                  const Icon(Icons.emoji_events_rounded,
+                      color: Colors.white70, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(

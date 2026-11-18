@@ -201,7 +201,7 @@ class CabeceraFicha extends StatelessWidget {
   /// mismo texto («Añadir foto» / «Cambiar foto»), mismo
   /// candado sin permiso y mismo indicador en curso.
   Widget _botonFoto() {
-    return Material(
+    final boton = Material(
       color: AppColores.grafitoTactico.withValues(alpha: 0.62),
       borderRadius: BorderRadius.circular(AppRadio.circular),
       child: InkWell(
@@ -246,6 +246,15 @@ class CabeceraFicha extends StatelessWidget {
         ),
       ),
     );
+    // 1.36 H-C1 (136-504): sin permiso, el botón
+    // deshabilitado lo EXPLICA con su tooltip.
+    if (!puedeCambiarFoto) {
+      return Tooltip(
+        message: 'Sin permiso para cambiar la foto',
+        child: boton,
+      );
+    }
+    return boton;
   }
 
   /// Una celda de la tira de datos clave.
@@ -305,7 +314,12 @@ class CabeceraFicha extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (foto != null)
-                  GestureDetector(
+                  // 1.36 H-C1 (136-505): la foto ampliable
+                  // se anuncia como botón «Ver foto».
+                  Semantics(
+                    button: true,
+                    label: 'Ver foto',
+                    child: GestureDetector(
                     onTap: onFotoTap,
                     child: heroTag == null
                         ? Image(
@@ -323,6 +337,7 @@ class CabeceraFicha extends StatelessWidget {
                                     FileImage(foto!), ancho: 720),
                                 fit: BoxFit.cover),
                           ),
+                    ),
                   )
                 else if (heroTag != null)
                   // 1.36 FICHA (136-214): el destino del
@@ -428,6 +443,13 @@ class CabeceraFicha extends StatelessWidget {
                           builder: (context, valor, _) => SizedBox(
                             height: 4,
                             child: LinearProgressIndicator(
+                              // 1.36 H-C1 (136-506): la barra
+                              // comunica su estado al lector
+                              // de pantalla.
+                              semanticsLabel:
+                                  'Progreso del período: $_diasTexto',
+                              semanticsValue:
+                                  '${(valor * 100).round()}%',
                               value: valor,
                               backgroundColor: AppColores
                                   .grafitoTactico
@@ -653,27 +675,41 @@ class Resumen360Ficha extends StatelessWidget {
           mainAxisAlignment:
               MainAxisAlignment.spaceAround,
           children: [
-            Column(
-              children: [
-                Text('${resumen.n}',
-                    style: AppTexto.displayPequeno
-                        .copyWith(
-                            color:
-                                AppColores.naranja)),
-                const Text('pagos',
-                    style: AppTexto.secundario),
-              ],
+            // 1.36 H-C1 (136-508): cada cifra va en
+            // Expanded con FittedBox (una cifra larga se
+            // encoge, no desborda) y el total se formatea
+            // con fmtMonto, como el resto de la ficha.
+            Expanded(
+              child: Column(
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('${resumen.n}',
+                        style: AppTexto.displayPequeno
+                            .copyWith(
+                                color:
+                                    AppColores.naranja)),
+                  ),
+                  const Text('pagos',
+                      style: AppTexto.secundario),
+                ],
+              ),
             ),
-            Column(
-              children: [
-                Text(total.toStringAsFixed(0),
-                    style: AppTexto.displayPequeno
-                        .copyWith(
-                            color:
-                                AppColores.naranja)),
-                const Text('CUP total',
-                    style: AppTexto.secundario),
-              ],
+            Expanded(
+              child: Column(
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(fmtMonto(total),
+                        style: AppTexto.displayPequeno
+                            .copyWith(
+                                color:
+                                    AppColores.naranja)),
+                  ),
+                  const Text('CUP total',
+                      style: AppTexto.secundario),
+                ],
+              ),
             ),
             if (metodoTop.isNotEmpty)
               Column(
@@ -815,12 +851,23 @@ bool entradaCoincideBusquedaHistorial(
   }
   final digitosQ = q.replaceAll(RegExp(r'\D'), '');
   if (digitosQ.isNotEmpty) {
-    final digitosPajar = <String>[
+    // 1.36 H-C1 (136-503): el monto se compara por TOKEN
+    // completo (cada grupo de dígitos de las fuentes),
+    // no por subcadena: «2500» ya no caza «12500».
+    final fuentes = <String>[
       '${e['trailing'] ?? ''}',
       if (pago != null) '${pago['monto'] ?? ''}',
       if (e['montoVenta'] != null) '${e['montoVenta']}',
-    ].join(' ').replaceAll(RegExp(r'\D'), '');
-    if (!digitosPajar.contains(digitosQ)) return false;
+    ];
+    final tokens = <String>{
+      for (final f in fuentes)
+        for (final m in RegExp(r'\d+').allMatches(f)) m.group(0)!,
+    };
+    final qNum = int.tryParse(digitosQ);
+    final coincide = tokens.contains(digitosQ) ||
+        (qNum != null &&
+            tokens.any((tk) => int.tryParse(tk) == qNum));
+    if (!coincide) return false;
   }
   return true;
 }
@@ -1339,10 +1386,18 @@ class FilaTimelineFicha extends StatelessWidget {
                         child: Text('${e['titulo']}',
                             style: AppTexto.cuerpo),
                       ),
-                      Text('${e['trailing'] ?? ''}',
-                          style: AppTexto.cuerpo.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: AppColores.naranja)),
+                      // 1.36 H-C1 (136-511): el trailing va
+                      // acotado (Flexible + FittedBox): con
+                      // fuente grande ya no aprieta el título.
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('${e['trailing'] ?? ''}',
+                              style: AppTexto.cuerpo.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColores.naranja)),
+                        ),
+                      ),
                       if (puedeRecibo)
                         IconButton(
                           tooltip: 'Reenviar recibo',
@@ -1554,7 +1609,18 @@ List<
   final porClave = <String, List<Map<String, dynamic>>>{};
   for (final e in entradas) {
     final fecha = '${e['fecha'] ?? ''}';
-    final clave = fecha.length >= 7 ? fecha.substring(0, 7) : '';
+    // 1.36 H-C1 (136-502): la clave solo vale si es
+    // AAAA-MM con mes 1–12; una fecha corrupta («2026-13»)
+    // cae a «Sin fecha» en vez de indexar fuera de rango
+    // o titular un mes vacío.
+    var clave = '';
+    if (fecha.length >= 7 && fecha[4] == '-') {
+      final mes = int.tryParse(fecha.substring(5, 7));
+      final anio = int.tryParse(fecha.substring(0, 4));
+      if (mes != null && mes >= 1 && mes <= 12 && anio != null) {
+        clave = fecha.substring(0, 7);
+      }
+    }
     if (!porClave.containsKey(clave)) {
       porClave[clave] = [];
       orden.add(clave);
