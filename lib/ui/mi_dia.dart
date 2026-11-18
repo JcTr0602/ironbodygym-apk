@@ -143,6 +143,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         if (c['id'] is int)
           c['id'] as int: c['foto_storage'] as String?,
     };
+    // ARG136-04 (= fila viva 136-104): la fila entera del
+    // cliente por id, para aplicar esVistaProtegida también
+    // a los cobrados (abajo), no solo a «Por cobrar hoy».
+    final clientePorId = <int, Map<String, dynamic>>{
+      for (final c in clientes)
+        if ((c['id'] as num?) != null) (c['id'] as num).toInt(): c,
+    };
     final cobrados = <Map<String, dynamic>>[];
     double total = 0;
     // 1.23 (auditoría extra #6): lo anulado no es cobrado del día.
@@ -150,6 +157,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
     for (final p in await LocalDb.instance.pagosDelDia(hoy, soloTelegramId: soloTid)) {
       if (esPagoAnulado(p, anuladosCola)) continue;
+      // ARG136-04 (= 136-104): el cobro de un protegido no
+      // entra en la lista de un no-dueño — ni su fila, ni su
+      // importe en el total, ni su entrada en el agrupado
+      // por entrenador (los tres derivan de esta lista).
+      // Para el dueño esVistaProtegida es false por diseño.
+      final cli = clientePorId[(p['cliente_id'] as num?)?.toInt()];
+      if (cli != null && esVistaProtegida(cli)) continue;
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
       total += monto;
       cobrados.add({
