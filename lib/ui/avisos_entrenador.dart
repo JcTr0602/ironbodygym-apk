@@ -18,6 +18,7 @@ import 'diseno.dart';
 import 'skeleton.dart';
 import 'widgets.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 class AvisosEntrenadorScreen extends StatefulWidget {
   const AvisosEntrenadorScreen({super.key});
@@ -109,7 +110,7 @@ class _AvisosEntrenadorScreenState
       _snack('Aviso guardado.');
       await _cargar();
     } catch (e) {
-      _snack('No se pudo guardar: $e');
+      _snack('No se pudo guardar: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -132,7 +133,7 @@ class _AvisosEntrenadorScreenState
       _snack('Aviso desactivado.');
       await _cargar();
     } catch (e) {
-      _snack('No se pudo desactivar: $e');
+      _snack('No se pudo desactivar: ${mensajeErrorAmable(e)}');
     }
   }
 

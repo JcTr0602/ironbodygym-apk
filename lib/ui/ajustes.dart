@@ -762,7 +762,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     try {
       await _exportarRespaldoFlujo();
     } catch (e) {
-      if (mounted) _msgError('No se pudo exportar: $e');
+      if (mounted) _msgError('No se pudo exportar: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -892,7 +892,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         return;
       }
     } catch (e) {
-      _msgError('No se pudo exportar: $e');
+      _msgError('No se pudo exportar: ${mensajeErrorAmable(e)}');
       return;
     } finally {
       latidoCandado.cancel();
@@ -919,7 +919,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await Share.shareXFiles([XFile(path)],
           text: 'Bitácora Iron Body Gym');
     } catch (e) {
-      _msgError('No se pudo exportar la bitácora: $e');
+      _msgError('No se pudo exportar la bitácora: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -946,7 +946,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         await AppLog.confirmarMarcaExportada(maxId);
       }
     } catch (e) {
-      _msgError('No se pudo exportar la bitácora: $e');
+      _msgError('No se pudo exportar la bitácora: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -990,7 +990,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             '${r['total']} registros');
       }
     } catch (e) {
-      _msgError('No se pudo completar: $e');
+      _msgError('No se pudo completar: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -1029,7 +1029,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             '${r['total']} registros');
       }
     } catch (e) {
-      _msgError('No se pudo reiniciar: $e');
+      _msgError('No se pudo reiniciar: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -1062,7 +1062,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       );
       ruta = res?.files.single.path;
     } catch (e) {
-      if (mounted) _msgError('No se pudo abrir el selector: $e');
+      if (mounted) _msgError('No se pudo abrir el selector: ${mensajeErrorAmable(e)}');
       return;
     }
     if (ruta == null || !mounted) return;
@@ -1333,7 +1333,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         ),
       );
     } catch (e) {
-      if (mounted) _msgError('No se pudo importar: $e');
+      if (mounted) _msgError('No se pudo importar: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -1386,7 +1386,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         ),
       );
     } catch (e) {
-      _msgError('No se pudo calcular: $e');
+      _msgError('No se pudo calcular: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -1419,7 +1419,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await FotosColaService.instance.limpiarHuerfanos();
       _msg('Caché de fotos limpiado');
     } catch (e) {
-      _msgError('No se pudo limpiar: $e');
+      _msgError('No se pudo limpiar: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -1453,7 +1453,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       if (n > 0) SyncEngine.instance.run();
     } catch (e) {
       if (!mounted) return;
-      _msg('Error al resincronizar: $e');
+      _msgError('No se pudo resincronizar: ${mensajeErrorAmable(e)}');
     }
   }
 

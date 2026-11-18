@@ -8,6 +8,7 @@ import '../app_log.dart';
 import '../auth.dart';
 import '../config.dart';
 import '../diagnostico_espejo.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
@@ -167,7 +168,7 @@ class _TarjetaDiagnosticoEspejoState
           text: 'Bitácora Iron Body Gym (espejo vacío)');
     } catch (e) {
       if (!mounted) return;
-      mostrarSnack(context, 'No se pudo exportar la bitácora: $e',
+      mostrarSnack(context, 'No se pudo exportar la bitácora: ${mensajeErrorAmable(e)}',
           significado: SignificadoChip.error);
     }
   }

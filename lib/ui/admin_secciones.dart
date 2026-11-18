@@ -973,7 +973,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _ultimoError = 'No se pudo leer el diagnóstico: $e';
+        _ultimoError = 'No se pudo leer el diagnóstico: ${mensajeErrorAmable(e)}';
         _cargando = false;
         // 1.36 H-B3 (136-808): lo que queda en pantalla es
         // la foto anterior: sellada, no vigente.
@@ -1986,7 +1986,7 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
       await _cargar();
       _snack('Ciclo forzado terminado. Revisa los pendientes.');
     } catch (e) {
-      _snack('No se pudo subir: $e');
+      _snack('No se pudo subir: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -2001,7 +2001,7 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
       if (mounted) setState(() => _copiaEnSesion = true);
       _snack('Copia local creada y registrada.');
     } catch (e) {
-      _snack('No se pudo crear la copia: $e');
+      _snack('No se pudo crear la copia: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -2209,7 +2209,7 @@ class _InvitadosFrecuentesScreenState
       AppLog.error('ui', 'carga_fallo', d: '$e');
       if (mounted) {
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }

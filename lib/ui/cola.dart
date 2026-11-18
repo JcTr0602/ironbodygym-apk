@@ -955,7 +955,7 @@ class _ColaScreenState extends State<ColaScreen> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo descartar la foto: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     }
   }
@@ -1515,8 +1515,8 @@ class _ColaScreenState extends State<ColaScreen> {
       SyncEngine.instance.reintentarFotosIncidencias();
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo reintentar: $e',
-            significado: SignificadoChip.error);
+        mostrarSnack(context, 'Sigue pendiente de subir; se reintentará solo.',
+            significado: SignificadoChip.alerta);
       }
     } finally {
       _reintentandoFotosInc = false;
@@ -1546,8 +1546,8 @@ class _ColaScreenState extends State<ColaScreen> {
       unawaited(ComprobantesService.instance.procesar());
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo reintentar: $e',
-            significado: SignificadoChip.error);
+        mostrarSnack(context, 'Sigue pendiente de subir; se reintentará solo.',
+            significado: SignificadoChip.alerta);
       }
     } finally {
       _reintentandoComp = false;

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../mediciones_cliente.dart';
 import '../tiempo.dart';
 import '../permisos_entrenador.dart';
@@ -739,7 +740,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             d: '$e');
         if (mounted) {
           mostrarSnack(context,
-              'No se pudo guardar la medición: $e',
+              'No se pudo guardar la medición: ${mensajeErrorAmable(e)}',
               significado: SignificadoChip.error);
         }
         return;

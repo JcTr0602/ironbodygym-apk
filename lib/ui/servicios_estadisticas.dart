@@ -17,6 +17,7 @@ import 'diseno.dart';
 import 'reporte_margenes.dart';
 import 'servicios_admin.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 /// v1.8.0: Estadísticas de servicios (SOLO DUEÑO), diseño 🟢 Argón
 /// (DISENO_DOSIS_ESTADISTICAS): dos tarjetas separadas —
@@ -924,7 +925,7 @@ class _ServiciosEstadisticasScreenState
           text: 'Estadísticas de Servicios Iron Body Gym');
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo exportar: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo exportar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     }
   }

@@ -18,6 +18,7 @@ import 'package:uuid/uuid.dart';
 import '../app_log.dart';
 import '../auth.dart';
 import '../config.dart';
+import '../errores_sync.dart';
 import '../gympedia_almacen.dart';
 import '../gympedia_validacion.dart';
 import '../localdb.dart';
@@ -459,7 +460,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       setState(() {});
     } catch (e) {
       AppLog.error('ui', 'gympedia_borrador_fallo', d: '$e');
-      _aviso('No se pudo guardar el borrador: $e');
+      _aviso('No se pudo guardar el borrador: ${mensajeErrorAmable(e)}');
     }
   }
 
@@ -624,7 +625,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       // encolar una segunda op condenada por CAS. El fallo va
       // a bitácora y el aviso nombra la causa.
       AppLog.error('ui', 'gympedia_publicar_fallo', d: '$e');
-      _aviso('No se pudo publicar: $e');
+      _aviso('No se pudo publicar: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -649,7 +650,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     }
     if (codigo == 200 || codigo == 201) return true;
     if (codigo > 0) {
-      _aviso('La subida de la imagen falló (HTTP $codigo). '
+      _aviso('La subida de la imagen falló. '
           'No se publicó nada; revisa la conexión e inténtalo de nuevo.');
     } else {
       _aviso('La subida de la imagen falló. No se publicó nada; '
@@ -726,7 +727,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       AppLog.error('ui', 'gympedia_retirar_fallo', d: '$e');
-      _aviso('No se pudo retirar: $e');
+      _aviso('No se pudo retirar: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }

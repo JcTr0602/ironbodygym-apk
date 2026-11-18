@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -375,7 +376,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       SyncEngine.instance.push();
     } catch (e) {
       if (!mounted) return;
-      mostrarSnack(context, 'No se pudo encolar la foto: $e', significado: SignificadoChip.error);
+      mostrarSnack(context, 'No se pudo guardar la foto para subirla: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
     }
   }
 

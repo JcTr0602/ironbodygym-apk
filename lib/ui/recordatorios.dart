@@ -10,6 +10,7 @@
 library;
 
 import '../app_log.dart';
+import '../errores_sync.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -420,7 +421,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       await _cargar();
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, '$e', significado: SignificadoChip.error);
+        mostrarSnack(context, mensajeErrorAmable(e), significado: SignificadoChip.error);
       }
     }
   }

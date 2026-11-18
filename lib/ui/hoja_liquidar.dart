@@ -15,6 +15,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../errores_sync.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -203,9 +204,7 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
     } catch (e) {
       if (mounted) {
         mostrarSnack(context,
-            '$e'.contains('en cola de sincronización')
-                ? '$e'.replaceFirst('Exception: ', '')
-                : 'No se pudo liquidar: $e',
+            mensajeErrorAmable(e),
             significado: SignificadoChip.error);
       }
     } finally {

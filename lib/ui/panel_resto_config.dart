@@ -707,7 +707,7 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
             context,
             titulo: 'Copia sin verificar',
             mensaje: 'La copia se creó, pero no se pudo '
-                'verificar: $e\n\n¿Compartirla de todos modos?',
+                'verificar: ${mensajeErrorAmable(e)}\n\n¿Compartirla de todos modos?',
             aceptar: 'Compartir igual',
             cancelar: 'No compartir',
             icono: Icons.warning_amber_rounded,
@@ -727,7 +727,7 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo exportar: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo exportar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _exportando = false);
@@ -798,7 +798,7 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
       await _guardarRegistro();
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo verificar: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo verificar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _verificando = false);

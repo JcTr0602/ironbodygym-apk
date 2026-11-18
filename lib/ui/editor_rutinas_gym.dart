@@ -38,6 +38,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth.dart';
 import '../config.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -999,7 +1000,7 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _guardando = false);
-      mostrarSnack(context, 'No se pudo publicar: $e',
+      mostrarSnack(context, 'No se pudo publicar: ${mensajeErrorAmable(e)}',
           significado: SignificadoChip.error);
     }
   }

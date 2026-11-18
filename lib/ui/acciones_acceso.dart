@@ -97,6 +97,7 @@ bool _soloDueno(BuildContext ctx) {
 /// dice nada al dueño — se mapea a su causa en sencillo:
 /// tiempo agotado, red o el mensaje del servidor.
 String mensajeErrorAcceso(Object e) {
+  if (e is String) return e;
   if (e is TimeoutException) {
     return 'Se acabó el tiempo de espera. Revisa tu conexión '
         'e inténtalo de nuevo.';
