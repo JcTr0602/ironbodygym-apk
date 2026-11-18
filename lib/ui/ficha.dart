@@ -2065,15 +2065,22 @@ class _FichaScreenState extends State<FichaScreen> {
                     children: [
                       const Icon(Icons.calendar_today_rounded, size: 18),
                       const SizedBox(width: 8),
-                      Text(
-                        pagadoHasta == null
-                            ? 'Pagado hasta: —'
-                            : 'Pagado hasta: ${pagadoHasta!.day.toString().padLeft(2, '0')}/'
-                                '${pagadoHasta!.month.toString().padLeft(2, '0')}/'
-                                '${pagadoHasta!.year}',
-                        style: AppTexto.subtitulo,
+                      // UI136-08: el texto manda en un
+                      // Expanded con ellipsis — sin él, a
+                      // 1,45× empujaba el icono de editar
+                      // fuera de la caja.
+                      Expanded(
+                        child: Text(
+                          pagadoHasta == null
+                              ? 'Pagado hasta: —'
+                              : 'Pagado hasta: ${pagadoHasta!.day.toString().padLeft(2, '0')}/'
+                                  '${pagadoHasta!.month.toString().padLeft(2, '0')}/'
+                                  '${pagadoHasta!.year}',
+                          style: AppTexto.subtitulo,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      const Spacer(),
+                      const SizedBox(width: 8),
                       Icon(Icons.edit_rounded,
                           size: 16,
                           color: AppColores.textoSecundario(context)),

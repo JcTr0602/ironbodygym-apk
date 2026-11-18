@@ -493,8 +493,12 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
           LayoutBuilder(
             builder: (context, cons) {
               _anchoLinea = cons.maxWidth;
+              // UI136-08: la franja crece con la escala de
+              // letra (a 1,45× el nombre no cabe en 34 dp).
+              final escala =
+                  MediaQuery.textScalerOf(context).scale(1);
               return SizedBox(
-                height: 34,
+                height: 34 * escala.clamp(1.0, 1.45),
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -638,7 +642,11 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                       : AppColores.borde(context),
               width: bordeHoy || contorno ? 1.5 : 1),
         ),
-        child: Center(child: hijo),
+        // UI136-08: la rejilla conserva sus 36 dp; la cifra
+        // («2/2») encoge con FittedBox en vez de tocar los
+        // bordes con la escala de letra grande.
+        child: Center(
+            child: FittedBox(fit: BoxFit.scaleDown, child: hijo)),
       );
     }
 

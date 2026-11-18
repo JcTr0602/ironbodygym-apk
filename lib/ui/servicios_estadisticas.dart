@@ -966,12 +966,17 @@ class _ServiciosEstadisticasScreenState
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          SizedBox(
-            width: 92,
+          // UI136-08: proporciones en vez del ancho fijo de
+          // 92 dp — a 1,45× «Miércoles» y el importe se
+          // truncaban; el valor gana una segunda línea.
+          Flexible(
+            flex: 2,
             child: Text(etiqueta,
                 style: AppTexto.cuerpo, overflow: TextOverflow.ellipsis),
           ),
+          const SizedBox(width: AppEspacio.sm),
           Expanded(
+            flex: 3,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(AppRadio.sm),
               child: LinearProgressIndicator(
@@ -988,7 +993,9 @@ class _ServiciosEstadisticasScreenState
           // ellipsis y cifras tabulares (un monto largo
           // desbordaba la fila).
           Flexible(
+            flex: 3,
             child: Text(valor,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: AppTexto.conTabulares(AppTexto.cuerpo)),
           ),

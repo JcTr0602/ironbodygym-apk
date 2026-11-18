@@ -773,7 +773,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           });
         },
         child: Container(
-          width: 108,
+          // UI136-08: 120 dp (antes 108) para que la etiqueta
+          // a dos líneas y el valor respiren a 1,45×.
+          width: 120,
           padding: const EdgeInsets.all(AppEspacio.md),
           decoration: BoxDecoration(
             color: seleccionada
@@ -792,13 +794,23 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               // (1.36 H-B4 136-883) un valor que no es cifra
               // («sin consultar») va en estilo métrico menor
               // y con tooltip que lo explica.
+              // UI136-08: el valor encoge con FittedBox en
+              // vez de cortarse («sin consultar», cifras
+              // largas) con la escala de letra grande.
               valorEsTexto
                   ? Tooltip(
                       message:
                           'La consulta falló: aún no se sabe cuántos son',
-                      child: Text(valor, style: AppTexto.metadato),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(valor, style: AppTexto.metadato),
+                      ),
                     )
-                  : Text(valor, style: AppTexto.tituloPagina),
+                  : FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child:
+                          Text(valor, style: AppTexto.tituloPagina),
+                    ),
               Text(etiqueta,
                   style: AppTexto.minuscula,
                   textAlign: TextAlign.center,
@@ -871,9 +883,23 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             ],
           ],
         ),
-        subtitle: Text(
-          '${a.telefono} · $ultimo'
-          '${a.pinPendiente ? ' · PIN sin cambiar' : ''}',
+        // UI136-08: el chip de estado vive en el subtítulo;
+        // el trailing queda solo con botones icono y el
+        // nombre gana el ancho (a 1,45× los tres controles
+        // lo estrangulaban).
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${a.telefono} · $ultimo'
+              '${a.pinPendiente ? ' · PIN sin cambiar' : ''}',
+            ),
+            const SizedBox(height: 4),
+            ChipEstado.semantico(
+              texto: chipTexto,
+              significado: chipSignificado,
+            ),
+          ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -884,10 +910,6 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 tooltip: 'Desbloquear',
                 onPressed: () => _desbloqueoRapido(a),
               ),
-            ChipEstado.semantico(
-              texto: chipTexto,
-              significado: chipSignificado,
-            ),
             IconButton(
               icon: const Icon(Icons.more_vert_rounded, size: 20),
               tooltip: 'Opciones rápidas',

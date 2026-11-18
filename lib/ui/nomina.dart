@@ -1195,13 +1195,20 @@ class _NominaScreenState extends State<NominaScreen> {
                               .copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
-                        Row(
+                        // UI136-08: Wrap en vez de Row — a
+                        // 1,45× etiqueta + campo + botón no
+                        // caben en una línea y la fila
+                        // desbordaba; ahora el campo y el
+                        // botón bajan bajo la etiqueta.
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          crossAxisAlignment:
+                              WrapCrossAlignment.center,
                           children: [
-                            Expanded(
-                              child: const Text(
-                                'CUP por cada cliente que pagó:',
-                                style: AppTexto.cuerpo,
-                              ),
+                            const Text(
+                              'CUP por cada cliente que pagó:',
+                              style: AppTexto.cuerpo,
                             ),
                             SizedBox(
                               width: 150,
@@ -1215,7 +1222,6 @@ class _NominaScreenState extends State<NominaScreen> {
                                 controller: _tarifaCtrl,
                               ),
                             ),
-                            const SizedBox(width: 8),
                             BotonPrimario(
                               texto: 'Guardar',
                               cargando: _guardandoTarifa,
