@@ -2019,6 +2019,16 @@ class FilaCliente extends StatelessWidget {
   /// deslizamiento): la fila no los recalcula en su build.
   final int? diasRestantesPre;
 
+  /// 1.36 (136-248): ventana «por vencer» del anillo y del
+  /// chip en ESTA superficie (Listas: 3, la de su pestaña;
+  /// defecto de la casa: 7).
+  final int umbralPorVencer;
+
+  /// 1.36 (136-244): reservar el alto de la barra de
+  /// antigüedad aunque la fila no la lleve (alto único en
+  /// las pestañas de atrasados de Listas).
+  final bool reservarBarra;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -2036,7 +2046,9 @@ class FilaCliente extends StatelessWidget {
       this.accionPrincipal,
       this.accionWhatsapp,
       this.importeTexto,
-      this.importeEtiqueta});
+      this.importeEtiqueta,
+      this.umbralPorVencer = 7,
+      this.reservarBarra = false});
 
   @override
   Widget build(BuildContext context) => _FilaCliente(
@@ -2056,7 +2068,9 @@ class FilaCliente extends StatelessWidget {
       accionPrincipal: accionPrincipal,
       accionWhatsapp: accionWhatsapp,
       importeTexto: importeTexto,
-      importeEtiqueta: importeEtiqueta);
+      importeEtiqueta: importeEtiqueta,
+      umbralPorVencer: umbralPorVencer,
+      reservarBarra: reservarBarra);
 }
 
 class _FilaCliente extends StatefulWidget {
@@ -2080,6 +2094,8 @@ class _FilaCliente extends StatefulWidget {
   final VoidCallback? accionWhatsapp;
   final String? importeTexto;
   final String? importeEtiqueta;
+  final int umbralPorVencer;
+  final bool reservarBarra;
   const _FilaCliente(
       {super.key,
       required this.cliente,
@@ -2097,7 +2113,9 @@ class _FilaCliente extends StatefulWidget {
       this.accionPrincipal,
       this.accionWhatsapp,
       this.importeTexto,
-      this.importeEtiqueta});
+      this.importeEtiqueta,
+      this.umbralPorVencer = 7,
+      this.reservarBarra = false});
 
   @override
   State<_FilaCliente> createState() => _FilaClienteState();
@@ -2235,7 +2253,11 @@ class _FilaClienteState extends State<_FilaCliente> {
             ? AppColores.info
             : (d == null || d < 0)
                 ? AppColores.error
-                : d <= 7
+                // 1.36 (136-248): el umbral ámbar es el de
+                // la superficie (Listas pasa 3, su ventana
+                // «Por vencer»): a 4–7 días en Listas el
+                // anillo ya es verde, como su pestaña.
+                : d <= widget.umbralPorVencer
                     ? AppColores.alerta
                     : AppColores.exito;
     final fotoSemaforo = AvatarCliente(
@@ -2289,8 +2311,11 @@ class _FilaClienteState extends State<_FilaCliente> {
     // convertir null en 999999 días pintaba «AL DÍA» a
     // quien nunca pagó; T04 lo curó en el modelo y aquí
     // llega a la fila).
-    final chipFila =
-        chipEstadoFila(dias: d, pagadoHasta: ph, enPausa: widget.enPausa);
+    final chipFila = chipEstadoFila(
+        dias: d,
+        pagadoHasta: ph,
+        enPausa: widget.enPausa,
+        umbralPorVencer: widget.umbralPorVencer);
     // 1.25 T47: el texto de días vive dentro del chip
     // (chipEstadoFila); Casa conserva su chip dorado con
     // el texto completo.
@@ -2359,40 +2384,90 @@ class _FilaClienteState extends State<_FilaCliente> {
                   // 1.25 T47: un solo chip de estado con
                   // fecha (Casa: su chip dorado de siempre,
                   // con el texto completo).
-                  if (esCasa)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.sm,
-                          vertical: AppEspacio.xs),
-                      decoration: BoxDecoration(
-                        color: AppColores.casaFondo,
-                        borderRadius: BorderRadius.circular(
-                            AppRadio.circular),
+                  // 1.36 (136-244): el chip de avisado va EN
+                  // LA MISMA FILA que el de estado (a su
+                  // derecha, flexible), no debajo — la fila
+                  // avisada ya no crece ~26 dp sobre sus
+                  // vecinas de la misma pestaña.
+                  Row(
+                    children: [
+                      Flexible(
+                        child: esCasa
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: AppEspacio.sm,
+                                    vertical: AppEspacio.xs),
+                                decoration: BoxDecoration(
+                                  color: AppColores.casaFondo,
+                                  borderRadius: BorderRadius.circular(
+                                      AppRadio.circular),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.home_rounded,
+                                        size: 16,
+                                        color: AppColores.casaIcono),
+                                    const SizedBox(width: 4),
+                                    // Jornada 1 de la 1.34: el texto
+                                    // completo desbordaba 3,1 px en la
+                                    // fila con los dos botones del
+                                    // trailing (Listas); flexible con
+                                    // elipsis en vez de recorte seco.
+                                    Flexible(
+                                      child: Text(textoDiasCasa,
+                                          overflow:
+                                              TextOverflow.ellipsis,
+                                          style: AppTexto.etiqueta
+                                              .copyWith(
+                                                  color:
+                                                      AppColores.casaTexto)),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : BadgeEstado(
+                                estado: chipFila.estado,
+                                texto: chipFila.texto),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.home_rounded,
-                              size: 16, color: AppColores.casaIcono),
-                          const SizedBox(width: 4),
-                          // Jornada 1 de la 1.34: el texto
-                          // completo desbordaba 3,1 px en la
-                          // fila con los dos botones del
-                          // trailing (Listas); flexible con
-                          // elipsis en vez de recorte seco.
-                          Flexible(
-                            child: Text(textoDiasCasa,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTexto.etiqueta.copyWith(
-                                    color: AppColores.casaTexto)),
+                      // 1.25 T116 (F1-26) · 1.36 (136-244):
+                      // el chip de avisado, en la misma fila.
+                      if (widget.avisoChip != null) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppEspacio.sm,
+                                vertical: AppEspacio.xs),
+                            decoration: BoxDecoration(
+                              color: AppColores.exito
+                                  .withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.circular),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.check_rounded,
+                                    size: 13,
+                                    color:
+                                        AppColores.exitoTexto(context)),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(widget.avisoChip!,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppTexto.etiqueta.copyWith(
+                                          color: AppColores.exitoTexto(
+                                              context),
+                                          fontWeight: FontWeight.w700)),
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
-                    )
-                  else
-                    BadgeEstado(
-                        estado: chipFila.estado,
-                        texto: chipFila.texto),
+                        ),
+                      ],
+                    ],
+                  ),
                   if (lineaContacto != null) ...[
                     const SizedBox(height: 2),
                     Text(lineaContacto,
@@ -2431,39 +2506,6 @@ class _FilaClienteState extends State<_FilaCliente> {
                           foregroundColor: AppColores.naranja,
                         ),
                         onPressed: widget.accionPrincipal!.alTocar,
-                      ),
-                    ),
-                  ],
-                  // 1.25 T116 (F1-26): el chip de avisado
-                  // en TEXTO, junto a los días.
-                  if (widget.avisoChip != null) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.sm,
-                          vertical: AppEspacio.xs),
-                      decoration: BoxDecoration(
-                        color: AppColores.exito
-                            .withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(
-                            AppRadio.circular),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.check_rounded,
-                              size: 13,
-                              color: AppColores.exitoTexto(context)),
-                          const SizedBox(width: 3),
-                          Text(widget.avisoChip!,
-                              style: AppTexto.etiqueta.copyWith(
-                                  // Pasada (Argón): el texto
-                                  // del chip (12 px) va en el
-                                  // token resuelto, no en el
-                                  // exito de relleno.
-                                  color: AppColores.exitoTexto(context),
-                                  fontWeight: FontWeight.w700)),
-                        ],
                       ),
                     ),
                   ],
@@ -2524,33 +2566,53 @@ class _FilaClienteState extends State<_FilaCliente> {
     // los días de atraso hasta los 60 y el color pasa de
     // ámbar a rojo a los 30, como el semáforo de siempre.
     final atraso = widget.diasAtraso;
-    if (atraso == null || atraso <= 0) return filaPrincipal;
+    if (atraso == null || atraso <= 0) {
+      // 1.36 (136-244): en las pestañas de atrasados, la
+      // fila sin barra (el sin-fecha) reserva el MISMO
+      // alto que la barra ocupa en sus vecinas — un solo
+      // alto de fila por pestaña.
+      if (widget.reservarBarra) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [filaPrincipal, const SizedBox(height: 10)],
+        );
+      }
+      return filaPrincipal;
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         filaPrincipal,
-        Padding(
-          padding: const EdgeInsets.fromLTRB(84, 0, 16, 6),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadio.sm),
-            child: SizedBox(
-              height: 4,
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: (fraccionBarraAtraso(atraso) * 1000).round(),
-                    child: Container(
-                      color: atraso >= 30
-                          ? AppColores.error
-                          : AppColores.alerta,
+        // 1.36 (136-234): la barra queda ROTULADA para
+        // accesibilidad y lectura asistida («Antigüedad
+        // del atraso: N días; la barra se llena a los 60»)
+        // y su umbral de color es el de la pestaña +30d.
+        Semantics(
+          label: 'Antigüedad del atraso: $atraso días; '
+              'la barra se llena a los 60 días',
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(84, 0, 16, 6),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+              child: SizedBox(
+                height: 4,
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: (fraccionBarraAtraso(atraso) * 1000).round(),
+                      child: Container(
+                        color: barraAtrasoEsRoja(atraso)
+                            ? AppColores.error
+                            : AppColores.alerta,
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    flex: 1000 -
-                        (fraccionBarraAtraso(atraso) * 1000).round(),
-                    child: Container(color: AppColores.borde(context)),
-                  ),
-                ],
+                    Expanded(
+                      flex: 1000 -
+                          (fraccionBarraAtraso(atraso) * 1000).round(),
+                      child: Container(color: AppColores.borde(context)),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2570,10 +2632,20 @@ double fraccionBarraAtraso(int dias) =>
 /// (para el color/icono de BadgeEstado) y texto completo
 /// con la fecha exacta. Sin fecha de vencimiento: estado
 /// sinPagos (gris), nunca «AL DÍA».
+/// 1.36 (136-233): el texto va DATO-PRIMERO — el dato de
+/// urgencia («hace N días» / «en N días») abre el chip y
+/// la fecha va detrás: a 1 línea con ellipsis, lo que se
+/// corta es la cola (la fecha), nunca el dato de trabajo.
+/// 1.36 (136-248): [umbralPorVencer] es la ventana que
+/// pinta el estado porVencer — Listas pasa la de su
+/// pestaña (3 días) para que anillo y chip no contradigan
+/// al rótulo en la pestaña «Al día»; el defecto conserva
+/// los 7 días de las demás superficies.
 ({EstadoMembresia estado, String texto}) chipEstadoFila({
   required int? dias,
   required String? pagadoHasta,
   bool enPausa = false,
+  int umbralPorVencer = 7,
 }) {
   // Yunque de cambios 1.31 (M1): en pausa aprobada en curso
   // el chip dice la pausa, no el vencimiento que no corre.
@@ -2594,7 +2666,7 @@ double fraccionBarraAtraso(int dias) =>
     final n = -dias;
     return (
       estado: EstadoMembresia.vencido,
-      texto: 'Venció $fecha · hace $n ${n == 1 ? 'día' : 'días'}'
+      texto: 'Hace $n ${n == 1 ? 'día' : 'días'} · venció $fecha'
     );
   }
   if (dias == 0) {
@@ -2603,14 +2675,20 @@ double fraccionBarraAtraso(int dias) =>
       texto: 'Vence hoy · $fecha'
     );
   }
-  if (dias <= 7) {
+  if (dias <= umbralPorVencer) {
     return (
       estado: EstadoMembresia.porVencer,
-      texto: 'Vence $fecha · en $dias ${dias == 1 ? 'día' : 'días'}'
+      texto: 'En $dias ${dias == 1 ? 'día' : 'días'} · vence $fecha'
     );
   }
   return (estado: EstadoMembresia.alDia, texto: 'Al día · vence $fecha');
 }
+
+/// 1.36 (136-234): la barra de antigüedad se pinta roja
+/// SOLO desde 31 días, el umbral de la pestaña «Atrasados
+/// +30d» (antes pintaba roja a los 30, que aún vive en
+/// «-30d»). Función pura para test.
+bool barraAtrasoEsRoja(int dias) => dias >= 31;
 
 /// 1.25 T52: la «próxima acción» probable de una fila de
 /// Buscar según su estado. Vencido o sin fecha → cobrar;

@@ -316,7 +316,11 @@ void main() {
       expect(chip.texto, contains('EN PAUSA'));
       expect(chip.estado, EstadoMembresia.congelado);
       final sin = chipEstadoFila(dias: -5, pagadoHasta: isoEn(-5));
-      expect(sin.texto, contains('Venció'));
+      // 1.36 (136-233): el chip compone dato-primero
+      // («Hace 5 días · venció …»); este test fijaba el
+      // «Venció» inicial de la composición anterior.
+      expect(sin.texto, contains('Hace 5 días'));
+      expect(sin.texto, contains('venció'));
     });
   });
 
@@ -376,7 +380,9 @@ void main() {
       ));
       await tester.pump();
       expect(find.text('Cliente Fila'), findsOneWidget);
-      expect(find.textContaining('Venció'), findsOneWidget);
+      // 1.36 (136-233): dato-primero — la insignia del
+      // vencido abre con «Hace N días», no con «Venció».
+      expect(find.textContaining('Hace 10 días'), findsOneWidget);
       expect(find.text('2000 CUP'), findsOneWidget);
       expect(find.text('tarifa mensual'), findsOneWidget);
       // El importe va en cifras tabulares (la columna no baila).

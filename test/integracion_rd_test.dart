@@ -284,7 +284,11 @@ void main() {
         () {
       final buscar = _fuente('lib/ui/buscar.dart');
       expect(buscar.contains('chipEstadoFila'), isTrue);
-      expect(buscar.contains('Venció '), isTrue);
+      // 1.36 (136-233): el chip compone dato-primero
+      // («Hace N días · venció …»); la fuente ya no trae
+      // el «Venció » inicial que este test fijaba.
+      expect(buscar.contains('Hace '), isTrue);
+      expect(buscar.contains('venció '), isTrue);
       expect(buscar.contains('Vence '), isTrue);
     });
 

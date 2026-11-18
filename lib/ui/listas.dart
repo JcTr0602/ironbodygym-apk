@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../congelaciones_gestion.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
@@ -27,6 +28,7 @@ import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
 import 'hoja_accion.dart';
 import 'preview_cobro.dart';
+import 'primitivas.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -136,6 +138,9 @@ class VistaLista {
 
 const kVistasListasKey = 'listas_vistas_v1';
 const kMaxVistasListas = 6;
+/// 1.36 (136-252): memoria local de cobrados de Listas
+/// que sobrevive a la visita (ver _cobradosPersistidos).
+const kCobradosListasKey = 'listas_cobrados_v1';
 
 class ListasScreen extends StatefulWidget {
   /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d,
@@ -269,7 +274,15 @@ class _ListasScreenState extends State<ListasScreen>
   // 1.25 T116 (F1-24): hasta que el usuario elija orden a
   // mano, cada pestaña usa SU defecto (urgencia en las de
   // trabajo, nombre en «Al día»).
-  bool _ordenManual = false;
+  // 1.36 (136-246): el orden manual es POR PESTAÑA — antes
+  // un solo booleano lo apagaba todo para siempre y el
+  // defecto de cada pestaña moría en silencio para toda la
+  // sesión. Aquí vive el orden elegido a mano en cada
+  // pestaña; el menú de orden ofrece además «Defecto de la
+  // pestaña», que lo restaura.
+  final Map<int, String> _ordenManualPorPestana = {};
+
+  String _defectoOrden(int pestana) => pestana == 4 ? 'nombre' : 'dias';
   // 1.25 Panel 12: vistas guardadas (SharedPreferences).
   List<VistaLista> _vistas = [];
   // 1.25 Panel 14: la última carga falló — los vacíos de
@@ -295,9 +308,32 @@ class _ListasScreenState extends State<ListasScreen>
   // vuelve en esta visita; al reabrir la pantalla manda
   // el espejo (ya sincronizado).
   final Set<int> _cobradosSesion = {};
+  // 1.36 (136-252): la memoria de cobrados SOBREVIVE a la
+  // visita — se persiste en este teléfono (SharedPreferences,
+  // clave de abajo) como {id: {antes, nuevo}}: al recargar,
+  // un cobrado cuyo espejo aún trae el pagado_hasta ANTERIOR
+  // sigue fuera de las pestañas de atraso y colocado según
+  // su NUEVO vencimiento; en cuanto el espejo refleja el
+  // cobro (pagado_hasta distinto del anterior), la entrada
+  // se poda sola. Es local y segura: no crea sincronización
+  // y caduca con el propio dato. LÍMITE DECLARADO (136-252):
+  // la marca «avisado» y esta memoria viven SOLO en este
+  // teléfono — no viajan al resto del equipo; quien avise o
+  // cobre desde otro aparato no deja rastro aquí.
+  final Map<int, ({String? antes, String? nuevo})> _cobradosPersistidos = {};
+  // El nuevo pagado_hasta del cobro en curso (del payload
+  // del diálogo, la misma cifra del Preview), para colocar
+  // al cliente en su pestaña al completar la salida.
+  final Map<int, String?> _nuevoHastaCobro = {};
   // La fila que está saliendo ahora mismo (una sola: el
   // cobro rápido ya tiene su guarda anti-doble-toque).
   int? _saliendoCobroId;
+  // 1.36 (136-241): clientes en pausa en curso, para pasar
+  // `enPausa` a la fila (su chip y su anillo dicen pausa).
+  // En el teléfono del entrenador el conjunto viene vacío
+  // por diseño (espejo de congelaciones solo-dueño): la
+  // señal queda cableada y pinta donde el dato existe.
+  Set<int> _pausados = {};
 
   /// 1.28 (M4-A2/R3M4-H5): estimado SÍNCRONO de una lista
   /// con las tarifas ya resueltas EN LOTE — antes cada
@@ -307,12 +343,23 @@ class _ListasScreenState extends State<ListasScreen>
   double _estimadoDe(List<Map<String, dynamic>> lista) {
     var total = 0.0;
     for (final c in lista) {
+      final especial =
+          _especialesFoto[(c['id'] as num?)?.toInt()];
+      // 1.36 (136-236): si el cliente tiene tarifa especial,
+      // el estimado usa SU método (una especial de solo
+      // transferencia ya no se ignora cayendo a efectivo).
+      // Sin especial no hay período/método del cliente que
+      // leer: rige la convención declarada en la cabecera
+      // («una mensualidad en efectivo de cada uno»).
+      final metodoEsp = '${especial?['metodo'] ?? ''}';
       total += precioCobroConEspecial(
         cliente: c,
         periodo: 'mensual',
-        metodo: 'efectivo',
+        metodo: (metodoEsp == 'transferencia' || metodoEsp == 'efectivo')
+            ? metodoEsp
+            : 'efectivo',
         precios: _preciosFoto,
-        especial: _especialesFoto[(c['id'] as num?)?.toInt()],
+        especial: especial,
       ).monto;
     }
     return total;
@@ -365,10 +412,17 @@ class _ListasScreenState extends State<ListasScreen>
     // restantes»: el más atrasado primero); «Nombre» solo
     // es el defecto de «Al día». Si el usuario elige otro
     // orden en el desplegable, su elección manda en todas.
-    _orden = widget.inicial == 4 ? 'nombre' : 'dias';
+    _orden = _defectoOrden(widget.inicial);
     _tab.addListener(() {
-      if (_ordenManual || !mounted) return;
-      final nuevo = _tab.index == 4 ? 'nombre' : 'dias';
+      if (!mounted) return;
+      // 1.36 (136-259): cambiar de sub-pestaña da la misma
+      // respuesta háptica que cambiar de segmento en el
+      // pilar que contiene a esta pantalla.
+      if (_tab.indexIsChanging) Tacto.seleccion();
+      // 1.36 (136-246): al llegar a una pestaña manda SU
+      // orden: el manual si lo tiene, su defecto si no.
+      final nuevo =
+          _ordenManualPorPestana[_tab.index] ?? _defectoOrden(_tab.index);
       if (nuevo != _orden) {
         setState(() {
           _orden = nuevo;
@@ -415,11 +469,12 @@ class _ListasScreenState extends State<ListasScreen>
     } catch (_) {}
   }
 
-  /// Aplica una vista guardada: pestaña, orden (manual:
-  /// manda sobre el defecto por pestaña) y búsqueda.
+  /// Aplica una vista guardada: pestaña, orden (manual
+  /// DE ESA PESTAÑA: manda sobre su defecto, 136-246) y
+  /// búsqueda.
   void _aplicarVista(VistaLista v) {
     setState(() {
-      _ordenManual = true;
+      _ordenManualPorPestana[v.pestana] = v.orden;
       _orden = v.orden;
       _busqueda = v.busqueda;
       _busquedaCtrl.text = v.busqueda;
@@ -435,11 +490,29 @@ class _ListasScreenState extends State<ListasScreen>
           significado: SignificadoChip.alerta);
       return;
     }
+    // 1.36 (136-255): duplicado exacto de alcance — la
+    // misma pestaña+orden+búsqueda ya guardada no se
+    // guarda dos veces (coincideCon existía y no se usaba
+    // al guardar).
+    if (_vistas.any((v) => v.coincideCon(
+        pestana: _tab.index, orden: _orden, busqueda: _busqueda))) {
+      mostrarSnack(context, 'Esa vista ya está guardada',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final nombre = await showDialog<String>(
       context: context,
       builder: (_) => const _DialogoNombreVista(),
     );
     if (nombre == null || nombre.trim().isEmpty || !mounted) return;
+    // 1.36 (136-255): tampoco dos vistas con el mismo
+    // nombre — los chips se leerían idénticos.
+    if (_vistas.any(
+        (v) => v.nombre.toLowerCase() == nombre.trim().toLowerCase())) {
+      mostrarSnack(context, 'Ya hay una vista con ese nombre',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     setState(() {
       _vistas = [
         ..._vistas,
@@ -472,15 +545,39 @@ class _ListasScreenState extends State<ListasScreen>
 
   /// La fila de chips de vistas (Panel 12): cada chip dice
   /// su alcance; la ✕ lo quita; el último guarda la actual.
+  /// 1.36 (136-257): sin vistas guardadas la fila NO ocupa
+  /// sitio permanente — queda solo el acceso plegado (un
+  /// botón de texto «Guardar vista»); la fila de chips
+  /// nace con la primera vista.
+  /// 1.36 (136-242): la fila scrollea con la pista de la
+  /// casa (ScrollHorizontalConPista), no con un scroll
+  /// crudo. 1.36 (136-256): los chips tocan a 48 dp
+  /// (materialTapTargetSize padded, el patrón UI-24).
+  /// 1.36 (136-255): a cupo lleno, «Guardar vista» queda
+  /// deshabilitado en vez de responder solo con un snack.
   Widget _filaVistas() {
+    if (_vistas.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            icon: const Icon(Icons.bookmark_add_rounded, size: 18),
+            label: const Text('Guardar vista'),
+            onPressed: _guardarVistaActual,
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      child: ScrollHorizontalConPista(
+        colorFondo: Theme.of(context).scaffoldBackgroundColor,
         child: Row(
           children: [
             for (final v in _vistas) ...[
               InputChip(
+                materialTapTargetSize: MaterialTapTargetSize.padded,
                 label: Text('${v.nombre} · ${v.alcance}'),
                 selected: v.coincideCon(
                     pestana: _tab.index,
@@ -492,9 +589,12 @@ class _ListasScreenState extends State<ListasScreen>
               const SizedBox(width: 8),
             ],
             ActionChip(
+              materialTapTargetSize: MaterialTapTargetSize.padded,
               avatar: const Icon(Icons.bookmark_add_rounded, size: 18),
               label: const Text('Guardar vista'),
-              onPressed: _guardarVistaActual,
+              onPressed: _vistas.length >= kMaxVistasListas
+                  ? null
+                  : _guardarVistaActual,
             ),
           ],
         ),
@@ -578,14 +678,58 @@ class _ListasScreenState extends State<ListasScreen>
     // _recalcularVisibles (síncrono).
     final pr = await preciosVigentes();
     final especiales = await tarifasActivasPorCliente('mensual');
+    // 1.36 (136-241): el conjunto de pausados en curso,
+    // para la señal `enPausa` de la fila.
+    final pausados = await CongelacionesService.instance
+        .idsCongeladosEnCurso(ahoraHabana());
+    // 1.36 (136-252): cobrados persistidos de visitas
+    // anteriores — siguen colocados según su nuevo
+    // vencimiento mientras el espejo traiga el ANTERIOR;
+    // cuando el espejo ya refleja el cobro, se podan.
+    await _cargarCobradosPersistidos();
+    final colocados = <String, List<Map<String, dynamic>>>{
+      'hoy': [],
+      'pv': [],
+      'ad': [],
+    };
+    var podados = false;
+    for (final e in _cobradosPersistidos.entries.toList()) {
+      Map<String, dynamic>? fila;
+      for (final c in activos) {
+        if ((c['id'] as num?)?.toInt() == e.key) {
+          fila = c;
+          break;
+        }
+      }
+      if (fila == null ||
+          (fila['pagado_hasta'] as String?) != e.value.antes) {
+        _cobradosPersistidos.remove(e.key);
+        podados = true;
+        continue;
+      }
+      _cobradosSesion.add(e.key);
+      if (esVistaProtegida(fila)) continue;
+      final copia = Map<String, dynamic>.of(fila)
+        ..['pagado_hasta'] = e.value.nuevo;
+      final d = diasRestantes(e.value.nuevo);
+      if (d == 0) {
+        colocados['hoy']!.add(copia);
+      } else if (d != null && d > 0 && d <= 3) {
+        colocados['pv']!.add(copia);
+      } else {
+        colocados['ad']!.add(copia);
+      }
+    }
+    if (podados) await _persistirCobrados();
     if (!mounted || gen != _cargaGen) return;
     setState(() {
-      _hoy = sinProtegidos(h);
+      _pausados = pausados;
+      _hoy = [...sinProtegidos(h), ...colocados['hoy']!];
       _menos30 = sinProtegidos(m30);
       _sinFecha = sinProtegidos(sinFecha);
       _mas30 = sinProtegidos(p30);
-      _porVencer = sinProtegidos(pv);
-      _alDia = sinProtegidos(ad);
+      _porVencer = [...sinProtegidos(pv), ...colocados['pv']!];
+      _alDia = [...sinProtegidos(ad), ...colocados['ad']!];
       _preciosFoto = pr;
       _especialesFoto = especiales;
       // Yunque 3 (K5-4, latente cazado por su test):
@@ -599,6 +743,41 @@ class _ListasScreenState extends State<ListasScreen>
       _cargando = false;
       _recalcularVisibles();
     });
+  }
+
+  /// 1.36 (136-252): lee la memoria local de cobrados
+  /// persistida (ver kCobradosListasKey). Un fallo de
+  /// lectura deja la memoria vacía: Listas funciona como
+  /// siempre, solo sin la persistencia entre visitas.
+  Future<void> _cargarCobradosPersistidos() async {
+    _cobradosPersistidos.clear();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final crudo = prefs.getString(kCobradosListasKey);
+      if (crudo == null || crudo.isEmpty) return;
+      final mapa = Map<String, dynamic>.from(jsonDecode(crudo) as Map);
+      for (final e in mapa.entries) {
+        final id = int.tryParse(e.key);
+        final v = e.value;
+        if (id == null || v is! Map) continue;
+        _cobradosPersistidos[id] = (
+          antes: v['antes'] as String?,
+          nuevo: v['nuevo'] as String?,
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistirCobrados() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          kCobradosListasKey,
+          jsonEncode({
+            for (final e in _cobradosPersistidos.entries)
+              '${e.key}': {'antes': e.value.antes, 'nuevo': e.value.nuevo},
+          }));
+    } catch (_) {}
   }
 
   /// Ordena una lista según el criterio elegido (punto 26).
@@ -681,8 +860,18 @@ class _ListasScreenState extends State<ListasScreen>
       // cabecera descuenta con su contador animado al
       // completar la salida). Sin recarga inmediata: el
       // espejo aún no trae el cobro y la fila resucitaría.
+      // 1.36 (136-253/252): se guarda el nuevo vencimiento
+      // del payload (la cifra del Preview) y el anterior,
+      // para colocar al cliente en la pestaña de su nuevo
+      // estado al completar la salida y persistir la
+      // memoria del cobro entre visitas.
       final id = (c['id'] as num?)?.toInt() ?? 0;
       if (id > 0) {
+        _nuevoHastaCobro[id] = payload['pagado_hasta'] as String?;
+        _cobradosPersistidos[id] = (
+          antes: c['pagado_hasta'] as String?,
+          nuevo: payload['pagado_hasta'] as String?,
+        );
         setState(() => _saliendoCobroId = id);
       } else {
         _cargar();
@@ -699,8 +888,23 @@ class _ListasScreenState extends State<ListasScreen>
   /// 1.28 (M4-C6): la animación de salida terminó — el
   /// cliente sale de todas las listas en memoria y queda
   /// en la memoria de la visita (ver _cobradosSesion).
+  /// 1.36 (136-253): no desaparece de la pantalla — entra
+  /// en la pestaña de su NUEVO vencimiento (hoy si vence
+  /// hoy, «Por vencer» si cae en la ventana de 3 días y
+  /// «Al día» en lo demás), con la fila actualizada al
+  /// nuevo pagado_hasta del cobro. Cobrar desde la propia
+  /// «Al día» ya no lo borra hasta la próxima recarga.
+  /// 1.36 (136-252): la memoria se persiste (ver
+  /// _cobradosPersistidos) para sobrevivir a la visita.
   void _completarSalidaCobro(int id) {
     if (!mounted) return;
+    Map<String, dynamic>? filaPrevia;
+    for (final l in [_hoy, _menos30, _sinFecha, _mas30, _porVencer, _alDia]) {
+      for (final c in l) {
+        if (((c['id'] as num?)?.toInt() ?? -1) == id) filaPrevia = c;
+      }
+    }
+    final previo = filaPrevia;
     setState(() {
       _cobradosSesion.add(id);
       bool noEs(Map<String, dynamic> c) =>
@@ -711,9 +915,22 @@ class _ListasScreenState extends State<ListasScreen>
       _mas30 = _mas30.where(noEs).toList();
       _porVencer = _porVencer.where(noEs).toList();
       _alDia = _alDia.where(noEs).toList();
+      if (previo != null) {
+        final copia = Map<String, dynamic>.of(previo)
+          ..['pagado_hasta'] = _nuevoHastaCobro[id];
+        final d = diasRestantes(_nuevoHastaCobro[id]);
+        if (d == 0) {
+          _hoy = [..._hoy, copia];
+        } else if (d != null && d > 0 && d <= 3) {
+          _porVencer = [..._porVencer, copia];
+        } else {
+          _alDia = [..._alDia, copia];
+        }
+      }
       if (_saliendoCobroId == id) _saliendoCobroId = null;
       _recalcularVisibles();
     });
+    _persistirCobrados();
   }
 
   /// 1.28 (M4-B1): pulsación larga en una fila = el menú
@@ -751,38 +968,98 @@ class _ListasScreenState extends State<ListasScreen>
     );
   }
 
+  /// 1.36 (136-240): el estado de UNA pasada guiada de
+  /// avisos sobre una pestaña entera — la cadena corre
+  /// sobre la lista unificada (con fecha + grupo sin
+  /// fecha) y al terminar (o al cortarse) deja resumen:
+  /// avisados, sin teléfono (nombrados) y pendientes.
+  /// 1.36 (136-239): el sin-teléfono se SALTA y se reporta
+  /// aquí; nunca se marca «avisado» sin avisar a nadie.
+  int _pasadaAvisados = 0;
+  int _pasadaTotal = 0;
+  final List<String> _pasadaSinTelefono = [];
+
+  /// Índice del próximo sin avisar CON teléfono desde
+  /// [desde] en la cadena unificada; los sin-teléfono del
+  /// camino se registran en la pasada (136-239) y se
+  /// saltan. -1 si no queda nadie avisables.
+  int _siguienteAvisable(List<Map<String, dynamic>> cadena, int desde) {
+    for (var j = desde; j < cadena.length; j++) {
+      final c = cadena[j];
+      final id = (c['id'] as num?)?.toInt() ?? 0;
+      if (_avisados.contains(id)) continue;
+      if (_movilCliente(c) == null) {
+        final nombre = '${c['nombre'] ?? 'Cliente'}';
+        if (!_pasadaSinTelefono.contains(nombre)) {
+          _pasadaSinTelefono.add(nombre);
+        }
+        continue;
+      }
+      return j;
+    }
+    return -1;
+  }
+
+  void _resumenPasada({bool cortada = false}) {
+    final pendientes =
+        _pasadaTotal - _pasadaAvisados - _pasadaSinTelefono.length;
+    final partes = <String>[
+      '$_pasadaAvisados avisado${_pasadaAvisados == 1 ? '' : 's'}',
+      if (_pasadaSinTelefono.isNotEmpty)
+        '${_pasadaSinTelefono.length} sin teléfono '
+            '(${_pasadaSinTelefono.join(', ')})',
+      if (pendientes > 0) '$pendientes sin avisar',
+    ];
+    mostrarSnack(
+      context,
+      '${cortada ? 'Pasada cortada' : 'Pasada terminada'}: '
+      '${partes.join(' · ')}',
+      significado: SignificadoChip.exito,
+      duracion: const Duration(seconds: 8),
+    );
+  }
+
   /// 1.28 (M4-B5): «Avisar a los atrasados de esta
   /// pestaña» — arranca la pasada GUIADA sobre la lista
   /// visible: cada aviso sigue siendo toque a toque por
   /// persona (WhatsApp se abre con la plantilla aprobada
   /// y la línea automática de la casa, vía _avisarEnCadena)
-  /// y cada marcado queda registrado como siempre. Empieza
-  /// por el primer sin avisar de la lista principal; si
-  /// allí no queda nadie, por el grupo sin fecha.
+  /// y cada marcado queda registrado como siempre.
+  /// 1.36 (136-240): la cadena es ÚNICA sobre la pestaña
+  /// entera (la lista principal y el grupo sin fecha son
+  /// una sola cola) y deja resumen final (ver _resumenPasada).
   void _avisarPestana(
       List<Map<String, dynamic>> rows,
       List<Map<String, dynamic>>? cola) {
-    for (var i = 0; i < rows.length; i++) {
-      final id = (rows[i]['id'] as num?)?.toInt() ?? 0;
-      if (!_avisados.contains(id)) {
-        _avisarEnCadena(rows, i);
-        return;
-      }
+    final cadena = [...rows, ...?cola];
+    _pasadaAvisados = 0;
+    _pasadaSinTelefono.clear();
+    _pasadaTotal =
+        cadena.where((c) => !_avisados.contains((c['id'] as num?)?.toInt() ?? 0)).length;
+    final i = _siguienteAvisable(cadena, 0);
+    if (i < 0) {
+      _resumenPasada();
+      return;
     }
-    if (cola != null) {
-      for (var i = 0; i < cola.length; i++) {
-        final id = (cola[i]['id'] as num?)?.toInt() ?? 0;
-        if (!_avisados.contains(id)) {
-          _avisarEnCadena(cola, i);
-          return;
-        }
-      }
-    }
+    _avisarEnCadena(cadena, i, enPasada: true);
   }
+
+  /// 1.36 (136-259): el fundido de la casa entre el vacío
+  /// y la lista de una pestaña al buscar (el corte seco
+  /// esqueleto→contenido va en el CruceEstados del cuerpo).
+  Widget _conCruce(Widget w, bool vacio) =>
+      CruceEstados(estado: vacio ? 'vacio' : 'contenido', child: w);
 
   /// 1.32: la barra de pestañas de vencimientos, compartida
   /// entre el AppBar (pantalla suelta) y el cuerpo (embebida
   /// en el Pilar 2).
+  // 1.36 (136-250): el rótulo de una pestaña SIN la cifra
+  // en cero — la pestaña existe (es navegación); la cifra
+  // sobra cuando vale 0 (regla del cero de Jc, la misma
+  // que la insignia del pilar cumple con su `> 0`).
+  String _rotuloPestana(String nombre, int n) =>
+      n > 0 ? '$nombre ($n)' : nombre;
+
   TabBar _barraPestanas() => TabBar(
           controller: _tab,
           // 1.36 (136-307/317): las pestañas no heredan la
@@ -803,7 +1080,8 @@ class _ListasScreenState extends State<ListasScreen>
             Tab(
               child: _NumeroAnimado(
                 valor: _visHoy.length.toDouble(),
-                builder: (_, v) => Text('Hoy (${v.round()})',
+                builder: (_, v) => Text(
+                    _rotuloPestana('Hoy', v.round()),
                     style: TextStyle(
                         color: AppColores.alertaTexto(context),
                         fontWeight: FontWeight.w600)),
@@ -816,38 +1094,39 @@ class _ListasScreenState extends State<ListasScreen>
               // que faltaban clientes de 4-7 días.
               child: _NumeroAnimado(
                 valor: _visPorVencer.length.toDouble(),
-                builder: (_, v) =>
-                    Text('Por vencer · 3 días (${v.round()})',
-                        style: TextStyle(
-                            color: AppColores.alertaTexto(context),
-                            fontWeight: FontWeight.w600)),
+                builder: (_, v) => Text(
+                    _rotuloPestana('Por vencer · 3 días', v.round()),
+                    style: TextStyle(
+                        color: AppColores.alertaTexto(context),
+                        fontWeight: FontWeight.w600)),
               ),
             ),
             Tab(
               child: _NumeroAnimado(
                 valor: (_visMenos30.length + _visSinFecha.length)
                     .toDouble(),
-                builder: (_, v) =>
-                    Text('Atrasados -30d (${v.round()})',
-                        style: TextStyle(
-                            color: AppColores.errorTexto(context),
-                            fontWeight: FontWeight.w600)),
+                builder: (_, v) => Text(
+                    _rotuloPestana('Atrasados -30d', v.round()),
+                    style: TextStyle(
+                        color: AppColores.errorTexto(context),
+                        fontWeight: FontWeight.w600)),
               ),
             ),
             Tab(
               child: _NumeroAnimado(
                 valor: _visMas30.length.toDouble(),
-                builder: (_, v) =>
-                    Text('Atrasados +30d (${v.round()})',
-                        style: TextStyle(
-                            color: AppColores.errorTexto(context),
-                            fontWeight: FontWeight.w600)),
+                builder: (_, v) => Text(
+                    _rotuloPestana('Atrasados +30d', v.round()),
+                    style: TextStyle(
+                        color: AppColores.errorTexto(context),
+                        fontWeight: FontWeight.w600)),
               ),
             ),
             Tab(
               child: _NumeroAnimado(
                 valor: _visAlDia.length.toDouble(),
-                builder: (_, v) => Text('Al día (${v.round()})',
+                builder: (_, v) => Text(
+                    _rotuloPestana('Al día', v.round()),
                     style: TextStyle(
                         color: AppColores.exitoTexto(context),
                         fontWeight: FontWeight.w600)),
@@ -856,13 +1135,27 @@ class _ListasScreenState extends State<ListasScreen>
           ],
         );
 
+  /// 1.36 (136-242): la barra de sub-pestañas con la pista
+  /// de desborde de la casa — al abrir con una pestaña
+  /// distinta de la primera, la seleccionada nacía cortada
+  /// sin señal de que hubiera más a los lados.
+  Widget _barraPestanasConPista() => SizedBox(
+        height: 48,
+        child: ScrollHorizontalConPista(
+          colorFondo: Theme.of(context).scaffoldBackgroundColor,
+          child: _barraPestanas(),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
             appBar: widget.embebida
           ? null
           : appBarIron(context, 'Vencimientos',
-              bottom: _barraPestanas()),
+              bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(48),
+                  child: _barraPestanasConPista())),
       body: Column(
         children: [
           // 1.30 (Oleada D6, UI130-20): banner compacto,
@@ -890,7 +1183,7 @@ class _ListasScreenState extends State<ListasScreen>
                 ? Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (widget.embebida) _barraPestanas(),
+                      if (widget.embebida) _barraPestanasConPista(),
                       // 16/25: buscador (nombre o teléfono, en las 5 pestañas).
                       Padding(
             padding:
@@ -900,7 +1193,12 @@ class _ListasScreenState extends State<ListasScreen>
                 Expanded(
                   child: CampoTexto(
                     controller: _busquedaCtrl,
-                    hint: 'Buscar cliente…',
+                    // 1.36 (136-261): el hint dice el
+                    // alcance real del buscador — también
+                    // encuentra por teléfono (dígitos del
+                    // teléfono efectivo, prefijo 53
+                    // normalizado), no solo por nombre.
+                    hint: 'Buscar cliente o teléfono…',
                     icono: Icons.search_rounded,
                     onChanged: (v) =>
                         setState(() {
@@ -928,8 +1226,15 @@ class _ListasScreenState extends State<ListasScreen>
                   onSelected: (v) => setState(() {
                     // F1-24: la elección manual manda
                     // sobre el defecto por pestaña.
-                    _ordenManual = true;
-                    _orden = v;
+                    // 1.36 (136-246): manda SOLO en esta
+                    // pestaña, y «defecto» la restaura.
+                    if (v == 'defecto') {
+                      _ordenManualPorPestana.remove(_tab.index);
+                      _orden = _defectoOrden(_tab.index);
+                    } else {
+                      _ordenManualPorPestana[_tab.index] = v;
+                      _orden = v;
+                    }
                     _recalcularVisibles();
                   }),
                   itemBuilder: (ctx) => [
@@ -945,6 +1250,13 @@ class _ListasScreenState extends State<ListasScreen>
                         value: 'dias',
                         checked: _orden == 'dias',
                         child: const Text('Días restantes')),
+                    // 1.36 (136-246): el gesto de
+                    // restauración del orden por defecto
+                    // de la pestaña, visible en el menú.
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                        value: 'defecto',
+                        child: Text('Defecto de la pestaña')),
                   ],
                 ),
               ],
@@ -959,7 +1271,12 @@ class _ListasScreenState extends State<ListasScreen>
             // 1.28 (M4-A2/R1M4-M2): mientras la primera foto
             // carga, esqueleto honesto en vez de las pestañas
             // vacías afirmando «Todo al día».
-            child: _cargando
+            // 1.36 (136-259): el paso esqueleto→contenido va
+            // con el fundido de la casa (CruceEstados), no
+            // con corte seco.
+            child: CruceEstados(
+              estado: _cargando ? 'cargando' : 'contenido',
+              child: _cargando
                 // 1.28 (M4-C1): el esqueleto tiene la FORMA
                 // de las filas reales de esta pantalla
                 // (avatar, dos líneas, dos botones redondos),
@@ -968,41 +1285,56 @@ class _ListasScreenState extends State<ListasScreen>
                 : TabBarView(
               controller: _tab,
               children: [
-                _lista(_visHoy, Icons.celebration_rounded,
-                    'Nadie vence hoy', 'Todo al día.',
-                    avisadosPre: _avisHoy,
-                    ilustracionVacio: 'assets/vacio_reloj.webp'),
+                // 1.36 (136-249): el vacío de «Hoy» se
+                // acota a su pestaña — «Todo al día.» era
+                // una afirmación global falsa con decenas
+                // de atrasados detrás.
+                _conCruce(
+                    _lista(_visHoy, Icons.celebration_rounded,
+                        'Nadie vence hoy', 'Ningún cliente vence hoy.',
+                        avisadosPre: _avisHoy,
+                        ilustracionVacio: 'assets/vacio_reloj.webp'),
+                    _visHoy.isEmpty),
                 // 1.25 T116 (F1-25): fuera la celebración
                 // en pestañas de deuda y en «Por vencer»:
                 // icono tranquilo y, en atrasados, el paso
                 // siguiente (ir a «Al día»).
-                _lista(_visPorVencer,
-                    Icons.check_circle_rounded, 'Nadie por vencer',
-                    'Nada en los próximos 3 días.',
-                    avisadosPre: _avisPorVencer),
-                _lista(_visMenos30,
-                    Icons.check_circle_rounded, 'Sin atrasados',
-                    'Nada de menos de un mes.',
-                    esColaCobro: true,
-                    estimado: _estimadoMenos30,
-                    cola: _visSinFecha,
-                    avisadosPre: _avisMenos30,
-                    tituloCola: 'Sin fecha de vencimiento',
-                    textoAccionVacio: 'Ver «Al día»',
-                    onAccionVacio: () => _tab.animateTo(4)),
-                _lista(_visMas30,
-                    Icons.check_circle_rounded, 'Sin atrasados',
-                    'Nada de más de un mes.',
-                    esColaCobro: true,
-                    estimado: _estimadoMas30,
-                    avisadosPre: _avisMas30,
-                    textoAccionVacio: 'Ver «Al día»',
-                    onAccionVacio: () => _tab.animateTo(4)),
-                _lista(_visAlDia, // v1.2.1
-                    Icons.check_circle_rounded, 'Nadie al día',
-                    'Todos los activos están vencidos.',
-                    avisadosPre: _avisAlDia),
+                _conCruce(
+                    _lista(_visPorVencer,
+                        Icons.check_circle_rounded, 'Nadie por vencer',
+                        'Nada en los próximos 3 días.',
+                        avisadosPre: _avisPorVencer),
+                    _visPorVencer.isEmpty),
+                _conCruce(
+                    _lista(_visMenos30,
+                        Icons.check_circle_rounded, 'Sin atrasados',
+                        'Nada de menos de un mes.',
+                        esColaCobro: true,
+                        estimado: _estimadoMenos30,
+                        cola: _visSinFecha,
+                        avisadosPre: _avisMenos30,
+                        tituloCola: 'Sin fecha de vencimiento',
+                        textoAccionVacio: 'Ver «Al día»',
+                        onAccionVacio: () => _tab.animateTo(4)),
+                    _visMenos30.isEmpty && _visSinFecha.isEmpty),
+                _conCruce(
+                    _lista(_visMas30,
+                        Icons.check_circle_rounded, 'Sin atrasados',
+                        'Nada de más de un mes.',
+                        esColaCobro: true,
+                        estimado: _estimadoMas30,
+                        avisadosPre: _avisMas30,
+                        textoAccionVacio: 'Ver «Al día»',
+                        onAccionVacio: () => _tab.animateTo(4)),
+                    _visMas30.isEmpty),
+                _conCruce(
+                    _lista(_visAlDia, // v1.2.1
+                        Icons.check_circle_rounded, 'Nadie al día',
+                        'Todos los activos están vencidos.',
+                        avisadosPre: _avisAlDia),
+                    _visAlDia.isEmpty),
               ],
+            ),
             ),
           ),
         ],
@@ -1021,7 +1353,11 @@ class _ListasScreenState extends State<ListasScreen>
   }
 
   Future<String?> _elegirAviso(Map<String, dynamic> c) async {
-    if (_movilCliente(c) == null) return 'marcar';
+    // 1.36 (136-239): sin teléfono NO se devuelve 'marcar'
+    // — marcar sin avisar a nadie dejaba al cliente verde
+    // «avisado» sin contacto alguno. La vía es 'sinTelefono':
+    // quien llama lo salta, lo dice y lo reporta aparte.
+    if (_movilCliente(c) == null) return 'sinTelefono';
     // SL-3 (G02-3, familia UI-12): la elección del aviso de
     // WhatsApp se presenta con la hoja de la casa
     // (showHojaIron), como el resto de la app — antes era un
@@ -1057,22 +1393,12 @@ class _ListasScreenState extends State<ListasScreen>
   Future<bool> _abrirWhatsapp(Map<String, dynamic> c) async {
     final movil = _movilCliente(c);
     if (movil == null) return false;
-    final nombre = '${c['nombre'] ?? ''}'.split(' ').first;
-    final hasta = '${c['pagado_hasta'] ?? ''}';
-    final f = hasta.length >= 10 ? fmtFecha(hasta) : '';
-    final venceTxt = f.isEmpty
-        ? 'tu mensualidad está por vencer'
-        : (hasta.substring(0, 10).compareTo(
-                    hoyHabanaIso()) <
-                0
-            ? 'tu mensualidad venció el $f'
-            : 'tu mensualidad vence el $f');
-    // FIN-27 de Argón (1.20): este recordatorio lo compone la
-    // app, así que cierra con la línea automática aprobada
-    // (respuestas al 58191577), como los de la bandeja.
-    final msg = 'Hola $nombre 👋, te recordamos de Iron Body Gym que '
-        '$venceTxt. ¡Te esperamos para seguir entrenando! 💪'
-        ' $lineaMensajeAutomatico';
+    // 1.36 (136-251): la plantilla es la ÚNICA de la casa
+    // (mensajeWaSegunEstado de negocio.dart, la misma de
+    // Bandeja y Buscar) — Listas ya no compone la suya, y
+    // el sin-fecha recibe su texto propio de «nunca pagó»
+    // en vez del falso «está por vencer».
+    final msg = mensajeWaSegunEstado(c);
     final ok = await launchUrl(
         Uri.parse('https://wa.me/$movil?text=${Uri.encodeComponent(msg)}'),
         mode: LaunchMode.externalApplication);
@@ -1122,20 +1448,54 @@ class _ListasScreenState extends State<ListasScreen>
   /// a buscarlo en la lista). La cadena sigue mientras el
   /// usuario la acepte; solo aplica al aviso por WhatsApp.
   Future<void> _avisarEnCadena(
-      List<Map<String, dynamic>> rows, int idx) async {
+      List<Map<String, dynamic>> rows, int idx,
+      {bool enPasada = false}) async {
     final c = rows[idx];
     final id = (c['id'] as num?)?.toInt() ?? 0;
     // v1.2.4 (C7): avisar por WhatsApp con el mensaje ya
     // escrito si tiene teléfono.
     final via = await _elegirAviso(c);
-    if (via == null || !mounted) return;
+    if (!mounted) return;
+    // 1.36 (136-239): sin teléfono no se marca nada — se
+    // dice en el acto y, en pasada, se reporta en el
+    // resumen y la cadena sigue con el siguiente avisable.
+    if (via == 'sinTelefono') {
+      mostrarSnack(context,
+          '${c['nombre']} no tiene teléfono: no se marcó como avisado',
+          significado: SignificadoChip.alerta);
+      if (enPasada) {
+        final nombre = '${c['nombre'] ?? 'Cliente'}';
+        if (!_pasadaSinTelefono.contains(nombre)) {
+          _pasadaSinTelefono.add(nombre);
+        }
+        final i = _siguienteAvisable(rows, idx + 1);
+        if (i >= 0) {
+          _avisarEnCadena(rows, i, enPasada: true);
+        } else {
+          _resumenPasada();
+        }
+      }
+      return;
+    }
+    if (via == null) {
+      // Hoja cerrada sin elegir: en pasada, el corte se
+      // declara con su resumen (136-240), no en silencio.
+      if (enPasada) _resumenPasada(cortada: true);
+      return;
+    }
     if (via == 'whatsapp') {
       final ok = await _abrirWhatsapp(c);
-      if (!ok) return;
+      if (!ok) {
+        if (enPasada && mounted) _resumenPasada(cortada: true);
+        return;
+      }
       // K5-4: sin confirmación de envío no hay marca ni
       // cadena: el cliente no sale de la pasada de avisos.
       final nombre = '${c['nombre'] ?? ''}'.split(' ').first;
-      if (!await _confirmarEnvioWhatsApp(nombre)) return;
+      if (!await _confirmarEnvioWhatsApp(nombre)) {
+        if (enPasada && mounted) _resumenPasada(cortada: true);
+        return;
+      }
     }
     await LocalDb.instance
         .marcarAvisado(id, pagadoHasta: c['pagado_hasta'] as String?);
@@ -1151,31 +1511,26 @@ class _ListasScreenState extends State<ListasScreen>
     // E3 (C5-02): la marca es local y la sync no tiene por
     // qué enterarse: el contenedor recuenta su insignia ya.
     widget.alCambiarDatos?.call();
-    Map<String, dynamic>? siguiente;
-    var idxSiguiente = -1;
-    if (via == 'whatsapp') {
-      for (var j = idx + 1; j < rows.length; j++) {
-        final oid = (rows[j]['id'] as num?)?.toInt();
-        if (oid == null || oid == id) continue;
-        if (!_avisados.contains(oid)) {
-          siguiente = rows[j];
-          idxSiguiente = j;
-          break;
-        }
-      }
-    }
+    if (enPasada) _pasadaAvisados++;
+    // 1.36 (136-240): el siguiente se busca en la cadena
+    // ENTERA y también tras un «Solo marcar» (antes esa
+    // vía cortaba la pasada en silencio); los sin-teléfono
+    // del camino se saltan y se reportan (136-239).
+    final idxSiguiente = _siguienteAvisable(rows, idx + 1);
     if (!mounted) return;
-    final sig = siguiente;
-    if (sig != null) {
+    if (idxSiguiente >= 0) {
       final nombreSig =
-          '${sig['nombre'] ?? ''}'.split(' ').first;
+          '${rows[idxSiguiente]['nombre'] ?? ''}'.split(' ').first;
       mostrarSnack(
         context,
         '${c['nombre']} marcado como avisado',
         significado: SignificadoChip.exito,
         accion: 'Siguiente: $nombreSig',
-        alAccion: () => _avisarEnCadena(rows, idxSiguiente),
+        alAccion: () =>
+            _avisarEnCadena(rows, idxSiguiente, enPasada: enPasada),
       );
+    } else if (enPasada) {
+      _resumenPasada();
     } else {
       mostrarSnack(
           context, '${c['nombre']} marcado como avisado',
@@ -1249,12 +1604,16 @@ class _ListasScreenState extends State<ListasScreen>
     }
     // 1.25 T46: la cabecera cuenta como primer ítem y
     // desplaza los índices de filas y de la cola.
-    final desplaza = esColaCobro && rows.isNotEmpty ? 1 : 0;
+    // 1.36 (136-235): la cabecera existe sobre el conjunto
+    // ENTERO de la pestaña (con fecha + sin fecha): si
+    // todos son sin-fecha también hay cabecera, y su «N
+    // clientes» es el mismo total que la pestaña promete.
     // 1.25 T50: progreso de la sesión de avisos sobre ESTA
     // lista — «N de M avisados» con su barra. Solo aparece
     // cuando ya hay alguien avisado (la sesión empezó);
     // sin avisos, la lista queda como siempre.
     final totalLista = rows.length + (cola?.length ?? 0);
+    final desplaza = esColaCobro && totalLista > 0 ? 1 : 0;
     // P-5: el conteo llega memoizado; el escaneo queda
     // solo como respaldo si un llamador no lo pasa.
     final avisadosLista = avisadosPre ??
@@ -1289,10 +1648,26 @@ class _ListasScreenState extends State<ListasScreen>
               // animada hasta el nuevo estimado.
               child: _NumeroAnimado(
                 valor: estimado,
+                // 1.36 (136-235): el «N clientes» es el
+                // total de la pestaña (con fecha + sin
+                // fecha), el mismo conjunto que el estimado
+                // suma y que la pestaña promete.
+                // 1.36 (136-236): la convención se declara
+                // ENTERA: mensualidad en efectivo, salvo
+                // tarifa especial vigente (que manda la suya).
+                // 1.36 (136-254): en el teléfono del
+                // entrenador la declaración dice además que
+                // su estimado no ve las especiales del dueño
+                // (espejo prohibido para su rol): la
+                // diferencia queda declarada en la superficie.
                 builder: (_, v) => Text(
-                  '${rows.length} clientes · '
+                  '$totalLista clientes · '
                   '≈ ${fmtMonto(v)} CUP por cobrar '
-                  '(una mensualidad de cada uno)',
+                  '(una mensualidad en efectivo de cada uno; '
+                  'con tarifa especial, la suya'
+                  '${AuthService().isOwner ? '' : '; en este '
+                      'teléfono, sin las tarifas especiales '
+                      'del dueño'})',
                   style: AppTexto.secundario
                       .copyWith(fontWeight: FontWeight.w700),
                 ),
@@ -1344,6 +1719,23 @@ class _ListasScreenState extends State<ListasScreen>
                     : null,
                 child: FilaCliente(
             cliente: c,
+            // 1.36 (136-245): Listas desambigua homónimos
+            // como Buscar — la línea «📞 teléfono / Carnet
+            // ··xxxx» distingue a dos clientes del mismo
+            // nombre sin entrar en la ficha.
+            desambiguar: true,
+            // 1.36 (136-241): la fila del pausado dice su
+            // pausa (chip y anillo), no su vencimiento.
+            enPausa: _pausados.contains(id),
+            // 1.36 (136-248): en esta pantalla la ventana
+            // «por vencer» es de 3 días — anillo y chip se
+            // alinean con la pestaña, no con los 7 de otras
+            // superficies.
+            umbralPorVencer: 3,
+            // 1.36 (136-244): en las pestañas de atrasados
+            // toda fila reserva el alto de la barra, la
+            // lleve o no (alto único por pestaña).
+            reservarBarra: esColaCobro,
             // 1.25 T46: en las pestañas de atrasados, la
             // barra de antigüedad (los sin fecha no la
             // llevan: sin fecha no hay antigüedad).
@@ -1392,12 +1784,37 @@ class _ListasScreenState extends State<ListasScreen>
                           : 'Marcar como avisado',
                       onPressed: () async {
                         if (avisado) {
+                          // 1.36 (136-258): desmarcar lleva
+                          // Deshacer en el propio snack — un
+                          // toque accidental sobre el ✓ ya no
+                          // devuelve al cliente a la cola sin
+                          // vía de vuelta (asimetría con el
+                          // cobro y con quitar vista, cerrada).
+                          final fechaPrevia = _avisadoEl[id];
                           await LocalDb.instance
                               .desmarcarAvisado(id);
                           if (mounted) {
-                            mostrarSnack(context, 'Marca de avisado quitada para ${c['nombre']}', significado: SignificadoChip.exito);
+                            mostrarSnack(context,
+                                'Marca de avisado quitada para ${c['nombre']}',
+                                significado: SignificadoChip.exito,
+                                accion: 'Deshacer',
+                                alAccion: () async {
+                                  await LocalDb.instance.marcarAvisado(id,
+                                      pagadoHasta:
+                                          c['pagado_hasta'] as String?);
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _avisados.add(id);
+                                    if (fechaPrevia != null) {
+                                      _avisadoEl[id] = fechaPrevia;
+                                    }
+                                    _refrescarConteosAvisados();
+                                  });
+                                  widget.alCambiarDatos?.call();
+                                });
                             setState(() {
                               _avisados.remove(id);
+                              _avisadoEl.remove(id);
                               _refrescarConteosAvisados();
                             });
                             // E3 (C5-02): desmarcar también
@@ -1415,9 +1832,13 @@ class _ListasScreenState extends State<ListasScreen>
                 // sin nombre (el botón de avisar sí lo tenía).
                 Tooltip(
                   message: 'Cobrar',
+                  // 1.36 (136-243): el botón de cobro, la
+                  // acción principal de la pantalla, toca a
+                  // 48×48 dp — el objetivo de la casa (UI-24);
+                  // medía 44×44.
                   child: Container(
-                    width: 44,
-                    height: 44,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       gradient:
                           AppColores.gradienteNaranja,
@@ -1501,6 +1922,36 @@ class _ListasScreenState extends State<ListasScreen>
             ),
           ),
           Expanded(child: lista),
+        ],
+      );
+    }
+    // 1.36 (136-260): una recarga fallida CON datos en
+    // pantalla se declara sobre la lista — antes _falloCarga
+    // solo se consultaba en el vacío y los datos viejos
+    // quedaban pintados sin marca (en la vía embebida ni
+    // hay SyncBanner que lo diga).
+    if (_falloCarga) {
+      cuerpo = Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+            child: Row(
+              children: [
+                Icon(Icons.cloud_off_rounded,
+                    size: 16, color: AppColores.errorTexto(context)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      'No se pudo recargar: se muestran los datos anteriores.',
+                      style: AppTexto.secundario.copyWith(
+                          fontWeight: FontWeight.w700)),
+                ),
+                TextButton(
+                    onPressed: _cargar, child: const Text('Reintentar')),
+              ],
+            ),
+          ),
+          Expanded(child: cuerpo),
         ],
       );
     }

@@ -154,7 +154,9 @@ void main() {
     // La pila entera, desplegada.
     expect(find.byType(TabBar), findsOneWidget,
         reason: 'las sub-pestañas están al abrir');
-    expect(find.text('Buscar cliente…'), findsOneWidget);
+    // 1.36 (136-261): el hint declara que también busca
+    // por teléfono (antes: «Buscar cliente…»).
+    expect(find.text('Buscar cliente o teléfono…'), findsOneWidget);
     expect(find.text('Guardar vista'), findsOneWidget,
         reason: 'la fila de vistas está al abrir');
     final botonAvisar =
@@ -180,7 +182,7 @@ void main() {
             'recogen');
     expect(find.text('Guardar vista'), findsNothing,
         reason: 'CAMPO-3: la fila de vistas se recoge');
-    expect(find.text('Buscar cliente…'), findsNothing,
+    expect(find.text('Buscar cliente o teléfono…'), findsNothing,
         reason: 'CAMPO-3: el buscador se recoge');
     expect(botonAvisar, findsNothing,
         reason: 'CAMPO-3: el botón de avisar se recoge '
@@ -203,7 +205,7 @@ void main() {
     expect(find.byType(TabBar), findsOneWidget,
         reason: 'al subir, las sub-pestañas vuelven');
     expect(find.text('Guardar vista'), findsOneWidget);
-    expect(find.text('Buscar cliente…'), findsOneWidget);
+    expect(find.text('Buscar cliente o teléfono…'), findsOneWidget);
     expect(botonAvisar, findsOneWidget,
         reason: 'el botón de avisar vuelve con la pila');
     expect(tester.takeException(), isNull);

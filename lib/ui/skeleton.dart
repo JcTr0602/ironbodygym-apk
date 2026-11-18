@@ -267,7 +267,9 @@ class SkeletonFilasListas extends StatelessWidget {
               const SizedBox(width: AppEspacio.sm),
               circulo(40),
               const SizedBox(width: AppEspacio.sm),
-              circulo(44),
+              // 1.36 (136-243): el círculo del cobro en la
+              // silueta es el botón real: 48 dp.
+              circulo(48),
             ],
           ),
         );
