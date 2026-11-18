@@ -355,8 +355,14 @@ String montoTxtActividad(double cup, double usd) {
         'anteayer'
       );
     case '7dias':
-      final fin = hoyIni.subtract(const Duration(days: 8));
-      final ini = hoyIni.subtract(const Duration(days: 14));
+      // ARG136-07: la ventana actual son 7 días naturales
+      // INCLUYENDO hoy (hoy−6…hoy, ver _filtrados): la
+      // anterior son los 7 previos exactos (hoy−13…hoy−7).
+      // Antes el filtro conservaba 8 días y el anterior
+      // cubría 7 desalineados: la etiqueta mentía en los
+      // dos lados.
+      final fin = hoyIni.subtract(const Duration(days: 7));
+      final ini = hoyIni.subtract(const Duration(days: 13));
       return (
         ini,
         fin.add(
@@ -392,7 +398,13 @@ bool tsEnRangoHabana(String ts, DateTime ini, DateTime fin) {
   } catch (_) {
     return false;
   }
-  if (dt.isBefore(ini) || dt.isAfter(fin)) return false;
+  // ARG136-07: el instante se juzga en pared Habana
+  // (aHabana), no en crudo contra campos de pared
+  // interpretados en la zona del dispositivo — con el
+  // dispositivo fuera de La Habana, un ts UTC de
+  // madrugada caía en el rango equivocado.
+  final h = aHabana(dt);
+  if (h.isBefore(ini) || h.isAfter(fin)) return false;
   return true;
 }
 
@@ -1106,7 +1118,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
             if (dia != ayerStr) return false;
             break;
           case '7dias':
-            final limite = sumarDiasIso(hoyStr, -7);
+            // ARG136-07: «7 días» son 7 días naturales
+            // incluyendo hoy (hoy−6…hoy); con −7 la
+            // ventana conservaba 8 y no casaba con el
+            // rango anterior de la comparativa.
+            final limite = sumarDiasIso(hoyStr, -6);
             if (dia.compareTo(limite) < 0) return false;
             break;
           case 'mes':
