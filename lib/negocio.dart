@@ -3446,6 +3446,11 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   }
 
   // 4) Recibos de pagos de hoy.
+  // (1.36 H-A2 136-1052, GF-089) un pago ANULADO — o con la
+  // anulación aún en cola — no genera recibo: la bandeja
+  // ofrecía enviar el recibo de un cobro ya deshecho.
+  final anuladosColaRecibos =
+      await LocalDb.instance.pagosAnuladosEnCola();
   final pagosHoy = (!esDueno && tid != null)
       ? await LocalDb.instance.pagosPorDiaYEntrenador(hoy, tid)
       : await LocalDb.instance.mirrorFiltrado('pagos', {'fecha': hoy});
@@ -3473,6 +3478,8 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       if (p['op_uuid'] != null) '${p['op_uuid']}',
   };
   for (final p in pagosHoy) {
+    // (136-1052) anulado o con anulación en cola: sin recibo.
+    if (esPagoAnulado(p, anuladosColaRecibos)) continue;
     final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
     final c = await clienteDeRecibo(cid);
     // 1.15 (H5): recibo de un protegido tampoco sale para no-dueño.
@@ -3541,6 +3548,12 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
     try {
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      // (136-1052) si el pago de esta op ya tiene una
+      // anulación en cola, su recibo tampoco se compone.
+      final pagoIdOp = (payload['pago_id'] as num?)?.toInt();
+      if (pagoIdOp != null && anuladosColaRecibos.contains(pagoIdOp)) {
+        continue;
+      }
       var fechaOp = (payload['fecha'] as String?) ?? '';
       if (fechaOp.length < 10) {
         fechaOp = '${op['creada_ts'] ?? ''}';
@@ -5461,19 +5474,45 @@ Future<int?> antiguedadPendiente({int? telegramId}) async {
     } catch (_) {}
   }
 
+  // (1.36 H-A2 136-1068) las MISMAS guardas del pendiente
+  // canónico: sin ellas, la antigüedad la marcaba un cobro
+  // anulado, de Casa, del dueño (CAMPO-15: nunca pendiente) o
+  // ya liquidado/libro C1, y el Home avisaba de una deuda que
+  // la pantalla de Pendiente no conoce.
+  final anuladosColaA = await LocalDb.instance.pagosAnuladosEnCola();
+  final casasA = await LocalDb.instance.idsCuentasCasa();
+  final liquidadosCacheA = <int, Set<String>>{};
+  final libroCacheA = <int, Set<String>>{};
+  Future<bool> cubierto(int? tid, String clave) async {
+    if (tid == null) return false;
+    final liq = liquidadosCacheA[tid] ??= await idsLiquidados(tid);
+    if (liq.contains(clave)) return true;
+    final lib = libroCacheA[tid] ??= await idsCubiertosLibroC1(tid);
+    return lib.contains(clave);
+  }
+
   // v1.3.4 (B2): filtro por columnas indexadas (v26);
   // 'entregado' no tiene columna y sigue filtrándose en Dart.
   for (final p in await LocalDb.instance
       .pagosPorFiltro(metodo: 'efectivo', telegramId: telegramId)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (esPagoAnulado(p, anuladosColaA)) continue;
+    if (_esPagoCasa(p, casasA)) continue;
+    final tidP = LocalDb.normalizarTelegramId(
+        p['telegram_user_id'] ?? p['registrado_por']);
+    if (tidP != null && AuthService.esDelDueno(tidP)) continue;
+    if (await cubierto(tidP, 'pagos:${p['id']}')) continue;
     considera(p['fecha'] as String?);
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (!esPendiente(d['entregado'])) continue;
-    if (telegramId != null &&
-        LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) {
+    if (!esPagoDiarioEfectivo(d)) continue;
+    final tidD = LocalDb.normalizarTelegramId(d['registrado_por']);
+    if (telegramId != null && tidD != telegramId) {
       continue;
     }
+    if (tidD != null && AuthService.esDelDueno(tidD)) continue;
+    if (await cubierto(tidD, 'pagos_diarios:${d['id']}')) continue;
     considera(d['fecha'] as String?);
   }
   if (masVieja == null) return null;
@@ -5523,8 +5562,13 @@ Future<double> entregadoHoy() async {
   // v1.3.4 (B2): full scan INTENCIONAL — el filtro es `entregado_ts`
   // (fecha de confirmación que guarda el servidor), campo del JSON sin
   // columna indexada en la migración v26. No migra a SQL indexado.
+  // (136-1068) Casa tampoco suma como entregado (extensión
+  // de la guarda canónica; su monto es 0, pero la cifra no
+  // debe depender de eso).
+  final casasE = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if (esPagoAnulado(p, anuladosCola)) continue;
+    if (_esPagoCasa(p, casasE)) continue;
     if (_diaEntrega(p) == hoy) {
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
@@ -5636,10 +5680,19 @@ Future<Map<String, dynamic>> pendienteDetalleHoy(
   final libroHoy = telegramId == null
       ? const <String>{}
       : await idsCubiertosLibroC1(telegramId);
+  // (136-1068) Casa y dueño fuera también aquí: en la vista
+  // global (telegramId null) el desglose sumaba el efectivo
+  // del dueño, que el pendiente canónico jamás cuenta
+  // (CAMPO-15), y mensualidades de cuentas a la Casa.
+  final casasHoy = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance
       .pagosPorDiaMetodo(hoy, 'efectivo', telegramId)) {
     if (!esPendiente(p['entregado'])) continue;
     if (esPagoAnulado(p, anuladosCola)) continue;
+    if (_esPagoCasa(p, casasHoy)) continue;
+    final tidH = LocalDb.normalizarTelegramId(
+        p['telegram_user_id'] ?? p['registrado_por']);
+    if (tidH != null && AuthService.esDelDueno(tidH)) continue;
     if (liquidadosHoy.contains('pagos:${p['id']}')) continue;
     if (libroHoy.contains('pagos:${p['id']}')) continue;
     mens += (p['monto'] as num?)?.toDouble() ?? 0;
@@ -5652,8 +5705,12 @@ Future<Map<String, dynamic>> pendienteDetalleHoy(
     if (!esPagoDiarioEfectivo(d)) continue;
     if (liquidadosHoy.contains('pagos_diarios:${d['id']}')) continue;
     if (libroHoy.contains('pagos_diarios:${d['id']}')) continue;
-    if (telegramId != null &&
-        LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) {
+    final tidDiario = LocalDb.normalizarTelegramId(d['registrado_por']);
+    // (136-1068) el diario del dueño tampoco es pendiente.
+    if (tidDiario != null && AuthService.esDelDueno(tidDiario)) {
+      continue;
+    }
+    if (telegramId != null && tidDiario != telegramId) {
       continue;
     }
     if (fechaNegocioHabana(d['fecha']) != hoy) {

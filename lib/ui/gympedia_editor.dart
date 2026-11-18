@@ -404,6 +404,19 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   Future<void> _guardarBorrador() async {
     // Ronda 17 M3-H1.
     if (!AuthService().isOwner) return;
+    // (136-954) guardar también es «operación en curso»: sin
+    // esta guarda, un doble toque guardaba dos veces y el
+    // botón quedaba vivo durante el guardado de otra op.
+    if (_ocupado) return;
+    setState(() => _ocupado = true);
+    try {
+      await _guardarBorradorFlujo();
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
+  Future<void> _guardarBorradorFlujo() async {
     if (_slug.text.trim().isEmpty) {
       final s = _slugDesdeTitulo(_titulo.text);
       if (s.isEmpty) {
@@ -645,6 +658,9 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   Future<void> _retirar() async {
     // Ronda 17 M3-H1.
     if (!AuthService().isOwner) return;
+    // (136-954) retirar tampoco corre dos veces ni durante
+    // otra operación.
+    if (_ocupado) return;
     final slug = _slug.text.trim();
     if (slug.isEmpty || !_hayPublicado) return;
     final ok = await showDialog<bool>(
@@ -668,6 +684,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       ),
     );
     if (ok != true) return;
+    // (136-954) la cadena de retirar corre como operación.
+    setState(() => _ocupado = true);
     // Yunque 3 (K7-5), espejo de R5-M6-6 en guia_editor: la
     // cadena de retirar (encolar + espejo + borrador) fallaba
     // en silencio ante una excepción local; ahora va a
@@ -689,6 +707,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     } catch (e) {
       AppLog.error('ui', 'gympedia_retirar_fallo', d: '$e');
       _aviso('No se pudo retirar: $e');
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
     }
   }
 
@@ -872,7 +892,15 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (!_sucio || _ocupado) {
+        // (1.36 H-A2 136-954) con una operación en curso NO se
+        // sale: antes el _ocupado entraba en la rama de salida
+        // directa y descartaba los cambios a mitad de un
+        // guardado/publicación.
+        if (_ocupado) {
+          _aviso('Espera a que termine la operación en curso.');
+          return;
+        }
+        if (!_sucio) {
           if (mounted) Navigator.of(context).pop();
           return;
         }
@@ -934,6 +962,11 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                   children: [
                     Expanded(
                       child: SelectorIronForm<String>(
+                        // (136-954) la clave atada a la revisión
+                        // base fuerza remontar el selector tras
+                        // una recarga desde lo publicado: muestra
+                        // el valor recargado, no el anterior.
+                        key: ValueKey('gym-cat-$_baseRevision'),
                         valorInicial: _categoria,
                         etiqueta: 'Categoría',
                         opciones: [
@@ -950,6 +983,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: SelectorIronForm<String>(
+                        key: ValueKey('gym-sello-$_baseRevision'),
                         valorInicial: _sello,
                         etiqueta: 'Sello de respaldo',
                         opciones: const [
@@ -966,6 +1000,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 const SizedBox(height: 12),
                 // v1.7.0 (A++): nivel de acceso del artículo.
                 SelectorIronForm<String>(
+                  key: ValueKey('gym-nivel-$_baseRevision'),
                   valorInicial: _nivel,
                   etiqueta: 'Nivel de acceso (App Plus)',
                   textoAyuda: 'Esencial: gratis para invitados · '

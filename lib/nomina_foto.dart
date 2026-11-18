@@ -106,6 +106,17 @@ Future<List<Map<String, dynamic>>> leerBonosMesConMigracion(
     String pref) async {
   final prefs = await SharedPreferences.getInstance();
   final ahora = ahoraHabana();
+  // (1.36 H-A2 136-806) la migración legada SOLO corre para el
+  // mes EN CURSO: las claves de prefs son del mes actual por
+  // construcción, y migrarlas con el pref de un mes histórico
+  // (una consulta del panel sobre septiembre, p. ej.) sellaba
+  // los bonos de ESTE mes dentro de aquel — históricos
+  // contaminados con bonos que no les pertenecen.
+  final prefActual =
+      '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+  if (pref != prefActual) {
+    return BonosNominaService.instance.leerBonos(pref);
+  }
   final claveLista = 'nomina_bonos_${ahora.year}_${ahora.month}';
   final claveSimple = 'nomina_bono_${ahora.year}_${ahora.month}';
   List<Map<String, dynamic>> bonos = [];

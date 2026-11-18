@@ -558,12 +558,31 @@ Future<void> _otorgarTarifaEnTxn(
       final fid = '${f['id']}';
       final yaLocal = await txn.query('tarifa_especial',
           where: 'id=?', whereArgs: [fid]);
-      if (yaLocal.isNotEmpty) continue;
       final hist = historialAppend(f['historial'] as String?, {
         'evento': 'inactivada_por_nueva',
         'en': ts,
         'nueva_id': id,
       });
+      if (yaLocal.isNotEmpty) {
+        // (1.36 H-A2 136-846) la copia local de la previa del
+        // espejo YA existe: se ACTUALIZA a inactiva con su
+        // historial y sello, no se salta — con el continue, la
+        // copia quedaba activa=1 en local y dos tarifas del
+        // mismo período convivían como vigentes. El historial
+        // se appenda sobre el de la copia LOCAL.
+        final histLocal = historialAppend(
+            yaLocal.first['historial'] as String?, {
+          'evento': 'inactivada_por_nueva',
+          'en': ts,
+          'nueva_id': id,
+        });
+        await txn.update(
+            'tarifa_especial',
+            {'activa': 0, 'historial': histLocal, 'actualizada_ts': ts},
+            where: 'id=?',
+            whereArgs: [fid]);
+        continue;
+      }
       await txn.insert('tarifa_especial', {
         'id': fid,
         'cliente_id': clienteId,
