@@ -3043,8 +3043,13 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
           Future<void> elegirRangoSheet() async {
             final ini = await showDatePicker(
               context: context,
-              // initialDate es solo UI y se deja como está (P2#11).
-              initialDate: rIni ?? DateTime.now(),
+              // ARG136-13 (revierte P2#11): initialDate también
+              // va en hora Habana — con el huso del
+              // dispositivo adelantado respecto a La Habana
+              // cerca de medianoche, la hora del dispositivo
+              // caía tras lastDate (AssertionError; en
+              // release, selector degradado).
+              initialDate: rIni ?? ahoraHabana(),
               firstDate: DateTime(2020),
               // P2#11 (Argón): el tope del rango es hoy en Habana.
               lastDate: ahoraHabana(),
@@ -3053,8 +3058,8 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
             if (ini == null || !context.mounted) return;
             final fin = await showDatePicker(
               context: context,
-              // initialDate es solo UI y se deja como está (P2#11).
-              initialDate: rFin ?? DateTime.now(),
+              // ARG136-13: como el inicial, en hora Habana.
+              initialDate: rFin ?? ahoraHabana(),
               firstDate: ini,
               lastDate: ahoraHabana(),
               helpText: 'Fecha final',
