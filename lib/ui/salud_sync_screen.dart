@@ -223,6 +223,22 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
     }
   }
 
+  /// (1.36 H-B4 136-898) etiqueta del grupo de tablas por estado.
+  String _etiquetaGrupoTablas(SemaforoTabla s) {
+    switch (s) {
+      case SemaforoTabla.verde:
+        return 'Al día';
+      case SemaforoTabla.ambar:
+        return 'Con avisos';
+      case SemaforoTabla.rojo:
+        return 'Con fallos';
+      case SemaforoTabla.gris:
+        return 'Vacías';
+      case SemaforoTabla.sinLeer:
+        return 'Sin leer';
+    }
+  }
+
   Color _colorSemaforo(SemaforoTabla s) {
     switch (s) {
       case SemaforoTabla.verde:
@@ -252,7 +268,7 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
       case EstadoSyncTelefono.sinRegistro:
         return 'Nunca sincronizó';
       case EstadoSyncTelefono.sinVerificar:
-        return 'Sin verificar';
+        return 'sin verificar';
     }
   }
 
@@ -261,8 +277,14 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
     if (!AuthService().isOwner) {
       return Scaffold(
           appBar: appBarIron(context, 'Salud de la sincronización'),
-          body: const Center(
-              child: Text('La salud del sync es solo el dueño.')));
+          // (1.36 H-B4 136-898) aviso de la casa, con motivo.
+          body: const EstadoVacio(
+            icono: Icons.health_and_safety_rounded,
+            titulo: 'Solo el dueño',
+            subtitulo: 'La salud de la sincronización enseña el '
+                'estado interno del espejo y de la cola: solo la '
+                've el dueño.',
+          ));
     }
     final d = _datos;
     return Scaffold(
@@ -361,6 +383,14 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                             .copyWith(color: AppColores.error),
                       ),
                     const SizedBox(height: AppEspacio.xs),
+                    // (1.36 H-B4 136-898) qué hace el botón.
+                    const Text(
+                      '«Comprobar ahora» fuerza una comprobación '
+                      'completa contra el servidor y, si hay tablas '
+                      'desfasadas, sincroniza y las re-descarga.',
+                      style: AppTexto.secundario,
+                    ),
+                    const SizedBox(height: AppEspacio.sm),
                     Wrap(
                       spacing: AppEspacio.sm,
                       runSpacing: AppEspacio.sm,
@@ -435,7 +465,7 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                       if (d.telefonosSinLeer)
                         filaAdmin(context, null,
                             'Estado de los teléfonos',
-                            'Sin verificar',
+                            'sin verificar',
                             negrita: true),
                       for (final t in d.telefonos)
                         filaAdmin(
@@ -452,7 +482,20 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                     ]),
                   seccionAdmin(context, Icons.table_chart_rounded,
                       'Tablas (${d.tablas.length})', [
+                    // (1.36 H-B4 136-898) plegadas por estado:
+                    // primero las que necesitan atención.
+                    for (final grupo in SemaforoTabla.values)
+                      if (d.tablas.any((t) => t.estado == grupo))
+                        ExpansionTile(
+                          initiallyExpanded: grupo == SemaforoTabla.rojo ||
+                              grupo == SemaforoTabla.sinLeer,
+                          title: Text(
+                            '${_etiquetaGrupoTablas(grupo)} · ${d.tablas.where((t) => t.estado == grupo).length}',
+                            style: AppTexto.cuerpo,
+                          ),
+                          children: [
                     for (final t in d.tablas)
+                      if (t.estado == grupo)
                       Padding(
                         padding: const EdgeInsets.only(
                             bottom: AppEspacio.sm),
@@ -500,6 +543,8 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                           ],
                         ),
                       ),
+                          ],
+                        ),
                   ]),
                   OutlinedButton.icon(
                     onPressed: () => Navigator.of(context).push(

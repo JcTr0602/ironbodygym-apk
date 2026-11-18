@@ -28,6 +28,7 @@ import 'admin_secciones.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'cola.dart';
 import 'salud_sync_screen.dart';
 import 'skeleton.dart';
 
@@ -165,16 +166,18 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   }
 
   Widget _avisoLecturasFallidas() {
-    return const Card(
+    // (1.36 H-B4 136-896) la misma severidad que Reparar da
+    // a una lectura fallida: error, con reintento.
+    return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: EdgeInsets.all(AppEspacio.md),
+        padding: const EdgeInsets.all(AppEspacio.md),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.warning_amber_rounded,
-                color: AppColores.alerta),
-            SizedBox(width: 8),
+            Icon(Icons.error_outline_rounded,
+                color: AppColores.errorTexto(context)),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'No se pudo leer el diario completo: lo que '
@@ -182,6 +185,10 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                 'son parciales.',
                 style: AppTexto.cuerpo,
               ),
+            ),
+            TextButton(
+              onPressed: _cargar,
+              child: const Text('Reintentar'),
             ),
           ],
         ),
@@ -340,12 +347,17 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
       case 'bajada':
         _ir(const BajadaCompletaScreen());
       case 'cola':
-        // La Cola es la pantalla que abrió este Centro.
-        Navigator.of(context).pop();
+        // (1.36 H-B4 136-895) navegar a la Cola de forma
+        // explícita, sin asumir desde dónde se abrió el Centro.
+        _ir(const ColaScreen());
       default:
         break;
     }
   }
+
+  /// (1.36 H-B4 136-895) destinos que de verdad navegan.
+  bool _destinoReal(String? destino) =>
+      destino == 'salud' || destino == 'bajada' || destino == 'cola';
 
   @override
   Widget build(BuildContext context) {
@@ -361,6 +373,14 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   _tarjetaEnVivo(),
+                  // (1.36 H-B4 136-896) «Sincronizar ahora»
+                  // junto al veredicto, no al final.
+                  const SizedBox(height: 12),
+                  BotonPrimario(
+                    texto: 'Sincronizar ahora',
+                    icono: Icons.sync_rounded,
+                    onPressed: _sincronizarAhora,
+                  ),
                   if (_lecturasFallidas > 0) ...[
                     const SizedBox(height: 16),
                     _avisoLecturasFallidas(),
@@ -375,12 +395,6 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                   _seccionHistorial(),
                   const SizedBox(height: 16),
                   _seccionPuertas(),
-                  const SizedBox(height: 16),
-                  BotonPrimario(
-                    texto: 'Sincronizar ahora',
-                    icono: Icons.sync_rounded,
-                    onPressed: _sincronizarAhora,
-                  ),
                 ],
               ),
             ),
@@ -418,12 +432,14 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
               ),
               title: Text(a.titulo),
               subtitle: Text(a.detalle),
-              trailing: a.destino != null && a.destino != 'reloj'
+              // (1.36 H-B4 136-895) sin destino real, la fila
+              // no parece tocable: ni chevron ni onTap.
+              trailing: _destinoReal(a.destino)
                   ? const Icon(Icons.chevron_right_rounded)
                   : null,
-              onTap: a.destino == null
-                  ? null
-                  : () => _abrirDestinoAviso(a),
+              onTap: _destinoReal(a.destino)
+                  ? () => _abrirDestinoAviso(a)
+                  : null,
             ),
           );
         }),
@@ -516,14 +532,25 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
             style: AppTexto.subtitulo),
         const SizedBox(height: 8),
         if (_corridas.isEmpty)
-          Text(
-            // L4-1: con lecturas fallidas el vacío no se
-            // afirma: puede haber corridas y no leerse.
-            _lecturasFallidas > 0
-                ? 'No se pudo leer el historial del diario.'
-                : 'Todavía no hay corridas registradas en el diario.',
-            style: AppTexto.cuerpo.copyWith(
-                color: AppColores.textoSecundario(context)),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                // L4-1: con lecturas fallidas el vacío no se
+                // afirma: puede haber corridas y no leerse.
+                _lecturasFallidas > 0
+                    ? 'No se pudo leer el historial del diario.'
+                    : 'Todavía no hay corridas registradas en el diario.',
+                style: AppTexto.cuerpo.copyWith(
+                    color: AppColores.textoSecundario(context)),
+              ),
+              // (1.36 H-B4 136-896) el vacío trae su acción.
+              TextButton.icon(
+                onPressed: _cargar,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Revisar de nuevo'),
+              ),
+            ],
           )
         else
           ..._corridas.map((c) {
@@ -589,7 +616,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                 () => _ir(const BajadaCompletaScreen())),
             const SizedBox(width: 8),
             puerta(Icons.list_alt_rounded, 'Cola',
-                () => Navigator.of(context).pop()),
+                () => _ir(const ColaScreen())),
           ],
         ),
       ],
@@ -933,7 +960,11 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
     // sin pendientes, con línea no descartada y sin
     // novedades por bajar que vayan antes); en otro caso
     // mandan el icono/color de la rama ganadora.
-    final avisoPersistidoManda = st.avisoSyncCorto != null &&
+    // (1.36 H-B4 136-893) un aviso vacío o de solo espacios
+    // NO pinta la tarjeta como error.
+    final hayAvisoPersistido =
+        (st.avisoSyncCorto?.trim() ?? '').isNotEmpty;
+    final avisoPersistidoManda = hayAvisoPersistido &&
         !corriendo &&
         st.pending == 0 &&
         st.enLinea != false &&
@@ -961,7 +992,7 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
       enLinea: st.enLinea,
       hayError: enError,
       hayNovedades: st.hayNovedades,
-      avisoPersistido: st.avisoSyncCorto != null,
+      avisoPersistido: hayAvisoPersistido,
       fueraCola: st.fueraCola,
     );
     return Tarjeta(
@@ -983,7 +1014,9 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
                     : enErrorVisible
                         ? AppColores.error
                         : sinVerificar
-                            ? AppColores.alertaOscuro
+                            // (1.36 H-B4 136-896) «sin
+                            // verificar» en neutro.
+                            ? AppColores.textoSecundario(context)
                             : AppColores.exito,
               ),
               const SizedBox(width: 8),

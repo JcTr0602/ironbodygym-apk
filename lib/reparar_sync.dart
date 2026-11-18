@@ -203,8 +203,11 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
     h.add(HallazgoReparacion(
       'No se pudieron comprobar ${f.manifiestoSinVerificar.length} '
           '${_n(f.manifiestoSinVerificar.length, 'tabla', 'tablas')}',
-      'Sin conexión o el servidor aún no las conoce: al '
-          'reparar se vuelve a comprobar todo.',
+      // (1.36 H-B4 136-904) las tablas concretas, con su
+      // nombre amigable, en el detalle del hallazgo.
+      'Sin conexión o el servidor aún no las conoce: '
+          '${f.manifiestoSinVerificar.map(SyncEngine.nombreAmigableTabla).join(', ')}. '
+          'Al reparar se vuelve a comprobar todo.',
       ClaseHallazgo.auto,
     ));
   }
@@ -333,6 +336,11 @@ Future<
       FotoAtascos antes,
       FotoAtascos despues,
       int divergentesManifiesto,
+      // (1.36 H-B4 136-903) el desenlace de la sincronización
+      // posterior: el resumen no puede afirmar reparaciones
+      // que no ocurrieron.
+      bool syncCorrio,
+      String? syncError,
     })> ejecutarReparacion() async {
   final antes = await capturarAtascos();
   var divergentes = -1;
@@ -352,8 +360,9 @@ Future<
   } catch (e) {
     AppLog.error('sync', 'reparar_manifiesto_fallo', d: '$e');
   }
+  SyncResultado? resSync;
   try {
-    await SyncEngine.instance.run(forzar: true);
+    resSync = await SyncEngine.instance.run(forzar: true);
   } catch (e) {
     AppLog.error('sync', 'reparar_sync_fallo', d: '$e');
   }
@@ -379,5 +388,7 @@ Future<
     antes: antes,
     despues: despues,
     divergentesManifiesto: divergentes,
+    syncCorrio: resSync?.corrio ?? false,
+    syncError: resSync?.error,
   );
 }

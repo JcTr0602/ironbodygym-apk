@@ -304,6 +304,25 @@ ErrorSync _clasificarErrorSync(Object error,
     );
   }
 
+  // 6b. Validación por TEXTO (1.36 H-B4 136-905): la rama
+  // de validación vivía dentro del bloque `httpStatus !=
+  // null`, así que un rechazo cuyo texto dice «invalid»
+  // (sin acento) o «inválid» sin código HTTP caía al
+  // genérico «desconocido». El texto manda también solo.
+  if (raw.contains('validación') ||
+      raw.contains('inválid') ||
+      raw.contains('invalid')) {
+    return ErrorSync(
+      codigo: 'validacion_negocio',
+      tipo: TipoErrorSync.validacion,
+      mensaje: 'Los datos no son válidos.',
+      accionTexto: 'Corrige los campos marcados e inténtalo de nuevo.',
+      accionBoton: AccionBoton.corregir,
+      datosGuardadosLocalmente: false,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+
   // 7. HTTP por código
   if (httpStatus != null) {
     if (httpStatus == 429) {
@@ -339,7 +358,7 @@ ErrorSync _clasificarErrorSync(Object error,
         detalleTecnicoOculto: 'HTTP 409',
       );
     }
-    if (httpStatus == 422 || raw.contains('validación') || raw.contains('inválid')) {
+    if (httpStatus == 422) {
       return ErrorSync(
         codigo: 'validacion_negocio',
         tipo: TipoErrorSync.validacion,
@@ -415,8 +434,10 @@ String resumenErrorDiagnostico(String crudo) {
   if (RegExp(r'\b50[023]\b').hasMatch(raw)) {
     return 'error interno del servidor';
   }
-  // 5. Genérico: sin volcar el texto técnico.
-  return 'error de sincronización';
+  // 5. Genérico: sin volcar el texto técnico, pero con la
+  // acción concreta (1.36 H-B4 136-900).
+  return 'error no reconocido: reintenta y, si sigue, '
+      'exporta la bitácora desde Salud del Sync';
 }
 
 /// 1.28 (M1-C5): explicación EN LENGUAJE LLANO de por qué

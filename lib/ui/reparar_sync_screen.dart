@@ -36,6 +36,8 @@ class RepararSyncScreen extends StatefulWidget {
         FotoAtascos antes,
         FotoAtascos despues,
         int divergentesManifiesto,
+        bool syncCorrio,
+        String? syncError,
       })> Function()? reparacionParaTest;
 
   @override
@@ -52,6 +54,8 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
     FotoAtascos antes,
     FotoAtascos despues,
     int divergentesManifiesto,
+    bool syncCorrio,
+    String? syncError,
   })? _resultado;
   // G08-1: el fallo de diagnóstico/reparación tiene fase
   // propia (error visible con salida y reintento); antes
@@ -219,6 +223,18 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
               'si sigue fallando, exporta la bitácora desde '
               'la Salud de la sincronización.',
         ),
+      if (!foto.fotoCompleta) ...[
+        const SizedBox(height: AppEspacio.sm),
+        // (1.36 H-B4 136-901) el botón que el texto promete.
+        OutlinedButton.icon(
+          onPressed: _diagnosticar,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Volver a revisar'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+          ),
+        ),
+      ],
       if (hallazgos.isEmpty && foto.fotoCompleta)
         // 1.29 (Oleada 6, D-16): el «todo está bien» de
         // reparar sync también habla el lenguaje de
@@ -337,9 +353,16 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
             const SizedBox(height: AppEspacio.sm),
             if (r.divergentesManifiesto > 0)
               Text(
-                'La comprobación encontró ${r.divergentesManifiesto} '
-                '${r.divergentesManifiesto == 1 ? 'tabla desfasada' : 'tablas desfasadas'} '
-                'y se mandaron a re-descargar.',
+                // (1.36 H-B4 136-901/903) «se mandaron a
+                // re-descargar» solo si la corrida corrió.
+                r.syncCorrio
+                    ? 'La comprobación encontró ${r.divergentesManifiesto} '
+                        '${r.divergentesManifiesto == 1 ? 'tabla desfasada' : 'tablas desfasadas'} '
+                        'y se mandaron a re-descargar.'
+                    : 'La comprobación encontró ${r.divergentesManifiesto} '
+                        '${r.divergentesManifiesto == 1 ? 'tabla desfasada' : 'tablas desfasadas'}, '
+                        'pero la sincronización no corrió: aún no se '
+                        'han re-descargado. Vuelve a revisar.',
                 style: AppTexto.cuerpo,
               ),
             if (r.divergentesManifiesto == 0)
@@ -348,9 +371,13 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
                 style: AppTexto.cuerpo,
               ),
             if (r.divergentesManifiesto < 0)
-              const Text(
-                'La comprobación no pudo completarse (¿sin '
-                'conexión?). La sincronización se ejecutó igual.',
+              Text(
+                r.syncCorrio
+                    ? 'La comprobación no pudo completarse (¿sin '
+                        'conexión?). La sincronización se ejecutó igual.'
+                    : 'La comprobación no pudo completarse (¿sin '
+                        'conexión?) y la sincronización tampoco '
+                        'corrió. Vuelve a revisar.',
                 style: AppTexto.cuerpo,
               ),
             const SizedBox(height: AppEspacio.xs),

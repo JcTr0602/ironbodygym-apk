@@ -49,6 +49,8 @@ class _TarjetaDiagnosticoEspejoState
   DiagnosticoEspejo? _diag;
   bool _cargado = false;
   bool _sincronizando = false;
+  // (1.36 H-B4 136-909) el fallo de la evaluación se dice.
+  bool _falloEvaluar = false;
 
   @override
   void initState() {
@@ -71,8 +73,18 @@ class _TarjetaDiagnosticoEspejoState
       setState(() {
         _diag = d;
         _cargado = true;
+        _falloEvaluar = false;
       });
-    } catch (_) {}
+    } catch (e) {
+      // (1.36 H-B4 136-909) antes el fallo era invisible:
+      // la tarjeta simplemente no salía.
+      AppLog.error('sync', 'diag_espejo_evaluar_fallo', d: '$e');
+      if (!mounted) return;
+      setState(() {
+        _cargado = true;
+        _falloEvaluar = true;
+      });
+    }
   }
 
   Future<void> _sincronizar() async {
@@ -163,6 +175,18 @@ class _TarjetaDiagnosticoEspejoState
   Future<void> _reportarWhatsApp() async {
     final d = _diag;
     if (d == null) return;
+    // (1.36 H-B4 136-909) confirmación visible: el reporte
+    // sale del teléfono con datos del diagnóstico.
+    final confirma = await DialogoApp.confirmar(
+      context,
+      titulo: 'Reportar al dueño',
+      mensaje: 'Se abrirá WhatsApp con el resumen del '
+          'diagnóstico (versión, clientes que había, última '
+          'sincronización buena y pendientes por subir).',
+      aceptar: 'Abrir WhatsApp',
+      icono: Icons.chat_outlined,
+    );
+    if (confirma != true || !mounted) return;
     final texto = 'Hola, la app Iron Body Gestión muestra los '
         'clientes en cero:\n\n'
         '• Versión: ${AppConfig.appVersion}\n'
@@ -223,7 +247,8 @@ class _TarjetaDiagnosticoEspejoState
         children: [
           Text(
             valor,
-            style: AppTexto.titulo.copyWith(color: AppColores.error),
+            style: AppTexto.titulo
+                .copyWith(color: AppColores.errorTexto(context)),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -236,6 +261,31 @@ class _TarjetaDiagnosticoEspejoState
   @override
   Widget build(BuildContext context) {
     final d = _diag;
+    if (_falloEvaluar) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+        child: Tarjeta(
+          child: Row(
+            children: [
+              Icon(Icons.error_outline_rounded,
+                  color: AppColores.errorTexto(context)),
+              const SizedBox(width: AppEspacio.sm),
+              const Expanded(
+                child: Text(
+                  'No se pudo revisar el espejo de clientes.',
+                  style: AppTexto.cuerpo,
+                ),
+              ),
+              TextButton(
+                onPressed: _evaluar,
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (!_cargado || d == null) return const SizedBox.shrink();
     final esDueno = AuthService().isOwner;
     return Padding(
@@ -273,8 +323,8 @@ class _TarjetaDiagnosticoEspejoState
                 Expanded(
                   child: Text(
                     'Los clientes aparecen en cero',
-                    style: AppTexto.titulo
-                        .copyWith(color: AppColores.error),
+                    style: AppTexto.titulo.copyWith(
+                        color: AppColores.errorTexto(context)),
                   ),
                 ),
               ],
@@ -321,11 +371,17 @@ class _TarjetaDiagnosticoEspejoState
                 FilledButton.icon(
                   onPressed: _sincronizando ? null : _sincronizar,
                   icon: _sincronizando
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 16,
                           height: 16,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2),
+                            strokeWidth: 2,
+                            // (1.36 H-B4 136-909) legible
+                            // sobre el botón relleno.
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onPrimary,
+                          ),
                         )
                       : const Icon(Icons.sync_rounded),
                   label: const Text('Sincronizar ahora'),

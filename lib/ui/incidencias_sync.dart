@@ -44,7 +44,9 @@ class IncidenciasSyncScreen extends StatefulWidget {
 
 class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   bool _cargando = true;
-  bool _procesando = false;
+  // (1.36 H-B4 136-907) el progreso es POR incidencia: la
+  // lista no se vacía mientras una tarjeta se resuelve.
+  final Set<String> _procesandoIds = {};
   // Auditoría Definitiva (B-15): error de carga VISIBLE. Esta
   // pantalla no recibió la familia R2-X1: su catch solo bajaba
   // _cargando y el build decía «Sin incidencias pendientes.»
@@ -147,7 +149,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
       ),
     );
     if (ok != true || !mounted) return;
-    setState(() => _procesando = true);
+    setState(() => _procesandoIds.add('${inc['id']}'));
     try {
       await aprobarIncidenciaSync('${inc['id']}');
       if (mounted) {
@@ -158,7 +160,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
       AppLog.error('incidencias_sync', 'aprobar_fallo', d: '$e');
       _aviso('No se pudo aprobar: ${mensajeErrorAmable(e)}');
     } finally {
-      if (mounted) setState(() => _procesando = false);
+      if (mounted) setState(() => _procesandoIds.remove('${inc['id']}'));
     }
   }
 
@@ -177,7 +179,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           descripcion: descripcionOp('${inc['tipo'] ?? ''}')),
     );
     if (nota == null || !mounted) return;
-    setState(() => _procesando = true);
+    setState(() => _procesandoIds.add('${inc['id']}'));
     try {
       await descartarIncidenciaSync('${inc['id']}',
           nota: nota.isEmpty ? null : nota);
@@ -189,7 +191,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
       AppLog.error('incidencias_sync', 'descartar_fallo', d: '$e');
       _aviso('No se pudo descartar: ${mensajeErrorAmable(e)}');
     } finally {
-      if (mounted) setState(() => _procesando = false);
+      if (mounted) setState(() => _procesandoIds.remove('${inc['id']}'));
     }
   }
 
@@ -288,7 +290,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
             ),
           ),
           Expanded(
-            child: _cargando || _procesando
+            child: _cargando
                 ? const EstadoCargando(texto: 'Cargando incidencias…')
                 : _errorCarga != null
                     ? EstadoError(
@@ -323,7 +325,10 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                         ),
                       )
                     : RefrescoIron(
-                        onRefresh: _cargar,
+                        // (1.36 H-B4 136-907) bajar para
+                        // actualizar SINCRONIZA el alcance,
+                        // no solo relee lo local.
+                        onRefresh: _sincronizar,
                         child: ListView.builder(
                           padding: const EdgeInsets.all(AppEspacio.lg),
                           itemCount: lista.length,
@@ -383,16 +388,30 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
             ? Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  // (1.36 H-B4 136-907) progreso en ESTA tarjeta.
+                  if (_procesandoIds.contains('${inc['id']}'))
+                    const Padding(
+                      padding: EdgeInsets.only(right: 12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
                   TextButton.icon(
                     icon: const Icon(Icons.close_rounded, size: 18),
                     label: const Text('Descartar'),
-                    onPressed: () => _descartar(inc),
+                    onPressed: _procesandoIds.contains('${inc['id']}')
+                        ? null
+                        : () => _descartar(inc),
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
                     icon: const Icon(Icons.check_rounded, size: 18),
                     label: const Text('Aprobar'),
-                    onPressed: () => _aprobar(inc),
+                    onPressed: _procesandoIds.contains('${inc['id']}')
+                        ? null
+                        : () => _aprobar(inc),
                   ),
                 ],
               )
@@ -431,7 +450,9 @@ class _DialogoDescartarIncidenciaState
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Descartar incidencia'),
-      content: Column(
+      // (1.36 H-B4 136-907) desplazable con el teclado abierto.
+      content: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('Se descartará la operación "${widget.descripcion}" '
@@ -445,6 +466,7 @@ class _DialogoDescartarIncidenciaState
             ),
           ),
         ],
+        ),
       ),
       actions: [
         TextButton(

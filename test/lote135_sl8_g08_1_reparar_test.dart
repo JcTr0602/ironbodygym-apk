@@ -130,6 +130,10 @@ void main() {
             antes: const FotoAtascos(opsError: 1),
             despues: const FotoAtascos(),
             divergentesManifiesto: 0,
+            // (1.36 H-B4 136-903) el contrato crece con el
+            // desenlace de la sync posterior.
+            syncCorrio: true,
+            syncError: null,
           );
         },
       ),
